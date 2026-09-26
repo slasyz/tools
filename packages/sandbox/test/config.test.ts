@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,61 +10,38 @@ import {
   addReadPathToConfig,
   addWritePathToConfig,
   DEFAULT_CONFIG,
+  getConfigPath,
   loadConfig,
-  mergeConfigLayers,
+  mergeConfig,
 } from "../src/config.ts";
 
-test("mergeConfigLayers combines configured arrays and deduplicates entries", () => {
-  const merged = mergeConfigLayers(
-    DEFAULT_CONFIG,
-    {
-      network: {
-        allowedDomains: ["global.example.com", "shared.example.com"],
-        deniedDomains: ["blocked.example.com"],
-        allowUnixSockets: ["/global.sock"],
-      },
-      filesystem: { allowRead: ["/global", "/shared"], denyWrite: ["global.key"] },
+test("mergeConfig uses configured arrays instead of defaults", () => {
+  const merged = mergeConfig(DEFAULT_CONFIG, {
+    network: {
+      allowedDomains: ["example.com", "shared.example.com"],
+      deniedDomains: ["blocked.example.com"],
+      allowUnixSockets: ["/custom.sock"],
     },
-    {
-      network: {
-        allowedDomains: ["project.example.com", "shared.example.com"],
-        deniedDomains: ["project-blocked.example.com"],
-        allowUnixSockets: ["/project.sock"],
-      },
-      filesystem: { allowRead: ["/project", "/shared"], denyWrite: ["project.key"] },
-    },
-  );
+    filesystem: { allowRead: ["/custom", "/shared"], denyWrite: ["custom.key"] },
+  });
 
-  assert.deepEqual(merged.network.allowedDomains, [
-    "global.example.com",
-    "shared.example.com",
-    "project.example.com",
-  ]);
-  assert.deepEqual(merged.network.deniedDomains, [
-    "blocked.example.com",
-    "project-blocked.example.com",
-  ]);
-  assert.deepEqual(merged.network.allowUnixSockets, ["/global.sock", "/project.sock"]);
-  assert.deepEqual(merged.filesystem.allowRead, ["/global", "/shared", "/project"]);
-  assert.deepEqual(merged.filesystem.denyWrite, ["global.key", "project.key"]);
+  assert.deepEqual(merged.network.allowedDomains, ["example.com", "shared.example.com"]);
+  assert.deepEqual(merged.network.deniedDomains, ["blocked.example.com"]);
+  assert.deepEqual(merged.network.allowUnixSockets, ["/custom.sock"]);
+  assert.deepEqual(merged.filesystem.allowRead, ["/custom", "/shared"]);
+  assert.deepEqual(merged.filesystem.denyWrite, ["custom.key"]);
 });
 
-test("mergeConfigLayers ignores malformed permission arrays", () => {
-  const merged = mergeConfigLayers(
-    DEFAULT_CONFIG,
-    { filesystem: { denyWrite: "*.key" as unknown as string[] } },
-    {},
-  );
+test("mergeConfig ignores malformed permission arrays", () => {
+  const merged = mergeConfig(DEFAULT_CONFIG, {
+    filesystem: { denyWrite: "*.key" as unknown as string[] },
+  });
   assert.deepEqual(merged.filesystem.denyWrite, DEFAULT_CONFIG.filesystem.denyWrite);
 });
 
-test("mergeConfigLayers uses defaults only for arrays not configured by either file", () => {
-  const merged = mergeConfigLayers(
-    DEFAULT_CONFIG,
-    { enabled: false, filesystem: { allowWrite: [] } },
-    { enabled: true },
-  );
-  assert.equal(merged.enabled, true);
+test("mergeConfig uses defaults for missing arrays", () => {
+  const merged = mergeConfig(DEFAULT_CONFIG, { enabled: false, filesystem: { allowWrite: [] } });
+  assert.equal(merged.enabled, false);
   assert.deepEqual(merged.filesystem.allowWrite, []);
   assert.deepEqual(merged.filesystem.allowRead, DEFAULT_CONFIG.filesystem.allowRead);
   assert.deepEqual(merged.network.allowedDomains, DEFAULT_CONFIG.network.allowedDomains);
@@ -83,24 +60,29 @@ test("permission writers only persist the property being changed", () => {
   assert.equal(readFileSync(configPath, "utf8").endsWith("\n"), true);
 });
 
-test("loadConfig accepts explicit paths and ignores malformed JSON", () => {
+test("loadConfig reads only ~/.agents/sandbox.json and ignores malformed JSON", () => {
   const root = mkdtempSync(join(tmpdir(), "sandbox-paths-"));
-  const globalPath = join(root, "global.json");
-  const projectPath = join(root, "project.json");
-  writeFileSync(
-    globalPath,
-    JSON.stringify({ network: { allowedDomains: ["global.example.com"] } }),
-  );
-  writeFileSync(
-    projectPath,
-    JSON.stringify({ network: { allowedDomains: ["project.example.com"] } }),
-  );
-  assert.deepEqual(loadConfig(globalPath, projectPath).network.allowedDomains, [
-    "global.example.com",
-    "project.example.com",
-  ]);
-  writeFileSync(projectPath, "not JSON");
-  assert.deepEqual(loadConfig(globalPath, projectPath).network.allowedDomains, [
-    "global.example.com",
-  ]);
+  const originalHome = process.env.HOME;
+  const originalCwd = process.cwd();
+  try {
+    process.env.HOME = root;
+    process.chdir(root);
+    const configPath = join(root, ".agents", "sandbox.json");
+    assert.equal(getConfigPath(), configPath);
+    mkdirSync(join(root, ".agents"));
+    mkdirSync(join(root, ".pi"));
+    writeFileSync(join(root, ".pi", "sandbox.json"), JSON.stringify({ enabled: false }));
+    writeFileSync(
+      configPath,
+      JSON.stringify({ network: { allowedDomains: ["configured.example.com"] } }),
+    );
+    assert.equal(loadConfig().enabled, true);
+    assert.deepEqual(loadConfig().network.allowedDomains, ["configured.example.com"]);
+    writeFileSync(configPath, "not JSON");
+    assert.deepEqual(loadConfig().network.allowedDomains, DEFAULT_CONFIG.network.allowedDomains);
+  } finally {
+    process.chdir(originalCwd);
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+  }
 });

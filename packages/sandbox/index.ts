@@ -1,7 +1,8 @@
 export {
   DEFAULT_CONFIG,
+  getConfigPath,
   loadConfig,
-  mergeConfigLayers,
+  mergeConfig,
   addDomainToConfig,
   addReadPathToConfig,
   addWritePathToConfig,

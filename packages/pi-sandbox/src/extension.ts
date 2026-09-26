@@ -18,7 +18,9 @@ import {
   domainIsAllowed,
   extractBlockedWritePath,
   extractDomainsFromCommand,
+  getConfigPath,
   initializeSandbox,
+  loadConfig,
   matchesPattern,
   reinitializeSandbox,
   resetSandbox,
@@ -29,7 +31,6 @@ import {
 } from "sandbox";
 
 import { createSandboxedBashOps } from "./bash.ts";
-import { getConfigPaths, loadConfig } from "./config.ts";
 import { resolveApplyPatchWritePaths } from "./policy.ts";
 import {
   formatSandboxConfiguration,
@@ -56,15 +57,15 @@ export default function (pi: ExtensionAPI) {
   let sessionContext: ExtensionContext | undefined;
   const allowances: SessionAllowances = { domains: [], readPaths: [], writePaths: [] };
 
-  const effectiveAllowances = (cwd: string) => resolveAllowances(loadConfig(cwd), allowances);
-  const effectiveDomains = (cwd: string) => effectiveAllowances(cwd).domains;
-  const effectiveReadPaths = (cwd: string) => effectiveAllowances(cwd).readPaths;
-  const effectiveWritePaths = (cwd: string) => effectiveAllowances(cwd).writePaths;
+  const effectiveAllowances = () => resolveAllowances(loadConfig(), allowances);
+  const effectiveDomains = () => effectiveAllowances().domains;
+  const effectiveReadPaths = () => effectiveAllowances().readPaths;
+  const effectiveWritePaths = () => effectiveAllowances().writePaths;
 
-  async function refreshSandbox(cwd: string): Promise<void> {
+  async function refreshSandbox(): Promise<void> {
     if (!sandboxInitialized) return;
     try {
-      await reinitializeSandbox(loadConfig(cwd), allowances);
+      await reinitializeSandbox(loadConfig(), allowances);
     } catch (error) {
       sandboxInitialized = false;
       console.error(`Warning: Failed to reinitialize sandbox: ${error}`);
@@ -76,10 +77,8 @@ export default function (pi: ExtensionAPI) {
     choice: Exclude<PermissionPromptResult["action"], "abort">,
     kind: "domain" | "read" | "write",
     value: string,
-    cwd: string,
   ): Promise<void> {
-    const { globalPath, projectPath } = getConfigPaths(cwd);
-    const target = choice === "project" ? projectPath : globalPath;
+    const target = getConfigPath();
 
     if (kind === "domain") {
       if (!allowances.domains.includes(value)) allowances.domains.push(value);
@@ -91,7 +90,7 @@ export default function (pi: ExtensionAPI) {
       if (!allowances.writePaths.includes(value)) allowances.writePaths.push(value);
       if (choice !== "session") addWritePathToConfig(target, value);
     }
-    await refreshSandbox(cwd);
+    await refreshSandbox();
   }
 
   async function enableSandbox(
@@ -99,7 +98,7 @@ export default function (pi: ExtensionAPI) {
     setProxyEnvironment: boolean,
   ): Promise<boolean> {
     const wasEnabled = sandboxEnabled;
-    const config = loadConfig(ctx.cwd);
+    const config = loadConfig();
     const platform = process.platform;
     if (platform !== "darwin" && platform !== "linux") {
       ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
@@ -129,7 +128,7 @@ export default function (pi: ExtensionAPI) {
     if (!sandboxEnabled) return;
     if (!sandboxInitialized) throw new Error("Sandbox is unavailable; patch blocked");
 
-    const config = loadConfig(request.cwd);
+    const config = loadConfig();
     if (!config.enabled) return;
     if (!sessionContext) throw new Error("Sandbox: session context is unavailable");
 
@@ -137,20 +136,19 @@ export default function (pi: ExtensionAPI) {
     const denyWrite = config.filesystem?.denyWrite ?? [];
     const deniedPath = paths.find((path) => matchesPattern(path, denyWrite));
     if (deniedPath) {
-      const { projectPath, globalPath } = getConfigPaths(request.cwd);
       throw new Error(
         `Sandbox: write access denied for "${deniedPath}" (in denyWrite). ` +
-          `To change this, edit denyWrite in:\n  ${projectPath}\n  ${globalPath}`,
+          `To change this, edit denyWrite in:\n  ${getConfigPath()}`,
       );
     }
 
     for (const path of paths) {
-      if (!shouldPromptForWrite(path, effectiveWritePaths(request.cwd))) continue;
+      if (!shouldPromptForWrite(path, effectiveWritePaths())) continue;
       const choice = await promptWriteBlock(pi, sessionContext, path);
       if (choice.action === "abort") {
         throw new Error(`Sandbox: write access denied for "${path}" (not in allowWrite)`);
       }
-      await applyChoice(choice.action, "write", choice.value, request.cwd);
+      await applyChoice(choice.action, "write", choice.value);
     }
   }
 
@@ -198,13 +196,12 @@ export default function (pi: ExtensionAPI) {
         if (blockedPath) {
           const choice = await promptWriteBlock(pi, ctx, blockedPath);
           if (choice.action !== "abort") {
-            await applyChoice(choice.action, "write", choice.value, ctx.cwd);
-            const config = loadConfig(ctx.cwd);
-            const { projectPath, globalPath } = getConfigPaths(ctx.cwd);
+            await applyChoice(choice.action, "write", choice.value);
+            const config = loadConfig();
             if (matchesPattern(blockedPath, config.filesystem?.denyWrite ?? [])) {
               ctx.ui.notify(
                 `⚠️ "${choice.value}" was added to allowWrite, but "${blockedPath}" is also in denyWrite and will remain blocked.\n` +
-                  `Check denyWrite in:\n  ${projectPath}\n  ${globalPath}`,
+                  `Check denyWrite in:\n  ${getConfigPath()}`,
                 "warning",
               );
               return result;
@@ -239,7 +236,7 @@ export default function (pi: ExtensionAPI) {
       };
     }
     for (const domain of extractDomainsFromCommand(event.command)) {
-      if (!domainIsAllowed(domain, effectiveDomains(ctx.cwd))) {
+      if (!domainIsAllowed(domain, effectiveDomains())) {
         const choice = await promptDomainBlock(pi, ctx, domain);
         if (choice.action === "abort") {
           return {
@@ -251,7 +248,7 @@ export default function (pi: ExtensionAPI) {
             },
           };
         }
-        await applyChoice(choice.action, "domain", choice.value, ctx.cwd);
+        await applyChoice(choice.action, "domain", choice.value);
       }
     }
     return { operations: createSandboxedBashOps(userShellPath) };
@@ -260,13 +257,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
     if (!sandboxEnabled) return;
     if (!sandboxInitialized) return { block: true, reason: "Sandbox is unavailable; tool blocked" };
-    const config = loadConfig(ctx.cwd);
+    const config = loadConfig();
     if (!config.enabled) return;
-    const { projectPath, globalPath } = getConfigPaths(ctx.cwd);
 
     if (isToolCallEventType("bash", event)) {
       for (const domain of extractDomainsFromCommand(event.input.command)) {
-        if (!domainIsAllowed(domain, effectiveDomains(ctx.cwd))) {
+        if (!domainIsAllowed(domain, effectiveDomains())) {
           const choice = await promptDomainBlock(pi, ctx, domain);
           if (choice.action === "abort") {
             return {
@@ -274,19 +270,19 @@ export default function (pi: ExtensionAPI) {
               reason: `Network access to "${domain}" is blocked (not in allowedDomains).`,
             };
           }
-          await applyChoice(choice.action, "domain", choice.value, ctx.cwd);
+          await applyChoice(choice.action, "domain", choice.value);
         }
       }
     }
 
     if (isToolCallEventType("read", event)) {
       const path = canonicalizePath(event.input.path);
-      if (!matchesPattern(path, effectiveReadPaths(ctx.cwd))) {
+      if (!matchesPattern(path, effectiveReadPaths())) {
         const choice = await promptReadBlock(pi, ctx, path);
         if (choice.action === "abort") {
           return { block: true, reason: `Sandbox: read access denied for "${path}"` };
         }
-        await applyChoice(choice.action, "read", choice.value, ctx.cwd);
+        await applyChoice(choice.action, "read", choice.value);
         return;
       }
     }
@@ -299,10 +295,10 @@ export default function (pi: ExtensionAPI) {
           block: true,
           reason:
             `Sandbox: write access denied for "${path}" (in denyWrite). ` +
-            `To change this, edit denyWrite in:\n  ${projectPath}\n  ${globalPath}`,
+            `To change this, edit denyWrite in:\n  ${getConfigPath()}`,
         };
       }
-      if (shouldPromptForWrite(path, effectiveWritePaths(ctx.cwd))) {
+      if (shouldPromptForWrite(path, effectiveWritePaths())) {
         const choice = await promptWriteBlock(pi, ctx, path);
         if (choice.action === "abort") {
           return {
@@ -310,7 +306,7 @@ export default function (pi: ExtensionAPI) {
             reason: `Sandbox: write access denied for "${path}" (not in allowWrite)`,
           };
         }
-        await applyChoice(choice.action, "write", choice.value, ctx.cwd);
+        await applyChoice(choice.action, "write", choice.value);
         return;
       }
     }
@@ -323,7 +319,7 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify("Sandbox disabled via --no-sandbox", "warning");
       return;
     }
-    if (!loadConfig(ctx.cwd).enabled) {
+    if (!loadConfig().enabled) {
       sandboxEnabled = false;
       ctx.ui.notify("Sandbox disabled via config", "info");
       return;
@@ -405,7 +401,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Allow cancelled", "info");
         return;
       }
-      await applyChoice(choice.action, kind, choice.value, ctx.cwd);
+      await applyChoice(choice.action, kind, choice.value);
       ctx.ui.notify(`Added ${choice.value} to ${configKey}`, "info");
     },
   });
@@ -417,10 +413,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Sandbox is disabled", "info");
         return;
       }
-      ctx.ui.notify(
-        formatSandboxConfiguration(loadConfig(ctx.cwd), getConfigPaths(ctx.cwd), allowances),
-        "info",
-      );
+      ctx.ui.notify(formatSandboxConfiguration(loadConfig(), getConfigPath(), allowances), "info");
     },
   });
 }

@@ -3,7 +3,7 @@ import test from "node:test";
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 import assert from "node:assert/strict";
 
-import { DEFAULT_CONFIG, mergeConfigLayers } from "../src/config.ts";
+import { DEFAULT_CONFIG, mergeConfig } from "../src/config.ts";
 import {
   buildRuntimeConfig,
   extractBlockedWritePath,
@@ -28,11 +28,7 @@ test("buildRuntimeConfig adds session allowances without mutating config", () =>
 });
 
 test("buildRuntimeConfig rejects wildcard allowlists from saved config and session allowances", () => {
-  const legacyConfig = mergeConfigLayers(
-    DEFAULT_CONFIG,
-    { network: { allowedDomains: ["*"] } },
-    {},
-  );
+  const legacyConfig = mergeConfig(DEFAULT_CONFIG, { network: { allowedDomains: ["*"] } });
   assert.throws(() => buildRuntimeConfig(legacyConfig), /Invalid domain pattern/);
   assert.throws(
     () => buildRuntimeConfig(DEFAULT_CONFIG, { domains: ["*"], readPaths: [], writePaths: [] }),
@@ -41,7 +37,7 @@ test("buildRuntimeConfig rejects wildcard allowlists from saved config and sessi
 });
 
 test("initializeSandbox rejects a legacy wildcard allowlist before runtime initialization", async () => {
-  const config = mergeConfigLayers(DEFAULT_CONFIG, { network: { allowedDomains: ["*"] } }, {});
+  const config = mergeConfig(DEFAULT_CONFIG, { network: { allowedDomains: ["*"] } });
   await assert.rejects(initializeSandbox(config), /Invalid domain pattern/);
 });
 

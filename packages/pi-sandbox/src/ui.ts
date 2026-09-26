@@ -7,7 +7,7 @@ import {
   type SessionAllowances,
 } from "sandbox";
 
-export type PermissionChoice = "abort" | "session" | "project" | "global";
+export type PermissionChoice = "abort" | "session" | "global";
 
 export interface PermissionPromptResult {
   action: PermissionChoice;
@@ -26,18 +26,11 @@ const PERMISSION_OPTIONS: PromptOption[] = [
   { label: "Allow for this session only", key: "s", action: "session" },
   { label: "Abort (keep blocked)", key: "esc", action: "abort" },
   {
-    label: "Allow for this project",
-    key: "P",
-    action: "project",
-    confirm: true,
-    hint: "→ .pi/sandbox.json",
-  },
-  {
     label: "Allow for all projects",
     key: "A",
     action: "global",
     confirm: true,
-    hint: "→ ~/.pi/agent/sandbox.json",
+    hint: "→ ~/.agents/sandbox.json",
   },
 ];
 
@@ -271,13 +264,12 @@ export function promptWriteBlock(
 
 export function formatSandboxConfiguration(
   config: SandboxConfig,
-  paths: { globalPath: string; projectPath: string },
+  configPath: string,
   allowances: SessionAllowances,
 ): string {
   return [
     "Sandbox Configuration",
-    `  Project config: ${paths.projectPath}`,
-    `  Global config:  ${paths.globalPath}`,
+    `  Config: ${configPath}`,
     "",
     "Network (bash + !cmd):",
     `  Allowed domains: ${config.network?.allowedDomains?.join(", ") || "(none)"}`,

@@ -1,7 +1,8 @@
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 export type SandboxConfig = SandboxRuntimeConfig & { enabled?: boolean };
 type NetworkConfig = NonNullable<SandboxConfig["network"]>;
@@ -53,75 +54,38 @@ function stringArray(value: unknown): string[] | undefined {
   return value;
 }
 
-function mergeConfiguredArray(
-  fallback: string[] | undefined,
-  globalValue: unknown,
-  projectValue: unknown,
-): string[] | undefined {
-  const globalEntries = stringArray(globalValue);
-  const projectEntries = stringArray(projectValue);
-  if (globalEntries === undefined && projectEntries === undefined) return fallback;
-  return [...new Set([...(globalEntries ?? []), ...(projectEntries ?? [])])];
+function configuredArray(fallback: string[] | undefined, value: unknown): string[] | undefined {
+  return stringArray(value) ?? fallback;
 }
 
-export function mergeConfigLayers(
-  defaults: SandboxConfig,
-  globalConfig: SandboxConfigFile,
-  projectConfig: SandboxConfigFile,
-): SandboxConfig {
-  const merged = mergeObjects(mergeObjects(defaults, globalConfig), projectConfig);
+export function mergeConfig(defaults: SandboxConfig, overrides: SandboxConfigFile): SandboxConfig {
+  const merged = mergeObjects(defaults, overrides);
   return {
     ...merged,
     network: {
       ...merged.network,
       allowedDomains:
-        mergeConfiguredArray(
-          defaults.network?.allowedDomains,
-          globalConfig.network?.allowedDomains,
-          projectConfig.network?.allowedDomains,
-        ) ?? [],
+        configuredArray(defaults.network?.allowedDomains, overrides.network?.allowedDomains) ?? [],
       deniedDomains:
-        mergeConfiguredArray(
-          defaults.network?.deniedDomains,
-          globalConfig.network?.deniedDomains,
-          projectConfig.network?.deniedDomains,
-        ) ?? [],
-      allowUnixSockets: mergeConfiguredArray(
+        configuredArray(defaults.network?.deniedDomains, overrides.network?.deniedDomains) ?? [],
+      allowUnixSockets: configuredArray(
         defaults.network?.allowUnixSockets,
-        globalConfig.network?.allowUnixSockets,
-        projectConfig.network?.allowUnixSockets,
+        overrides.network?.allowUnixSockets,
       ),
-      allowMachLookup: mergeConfiguredArray(
+      allowMachLookup: configuredArray(
         defaults.network?.allowMachLookup,
-        globalConfig.network?.allowMachLookup,
-        projectConfig.network?.allowMachLookup,
+        overrides.network?.allowMachLookup,
       ),
     },
     filesystem: {
       ...merged.filesystem,
       denyRead:
-        mergeConfiguredArray(
-          defaults.filesystem?.denyRead,
-          globalConfig.filesystem?.denyRead,
-          projectConfig.filesystem?.denyRead,
-        ) ?? [],
-      allowRead: mergeConfiguredArray(
-        defaults.filesystem?.allowRead,
-        globalConfig.filesystem?.allowRead,
-        projectConfig.filesystem?.allowRead,
-      ),
+        configuredArray(defaults.filesystem?.denyRead, overrides.filesystem?.denyRead) ?? [],
+      allowRead: configuredArray(defaults.filesystem?.allowRead, overrides.filesystem?.allowRead),
       allowWrite:
-        mergeConfiguredArray(
-          defaults.filesystem?.allowWrite,
-          globalConfig.filesystem?.allowWrite,
-          projectConfig.filesystem?.allowWrite,
-        ) ?? [],
+        configuredArray(defaults.filesystem?.allowWrite, overrides.filesystem?.allowWrite) ?? [],
       denyWrite:
-        mergeConfiguredArray(
-          defaults.filesystem?.denyWrite,
-          globalConfig.filesystem?.denyWrite,
-          projectConfig.filesystem?.denyWrite,
-        ) ?? [],
+        configuredArray(defaults.filesystem?.denyWrite, overrides.filesystem?.denyWrite) ?? [],
     },
   };
 }
@@ -140,13 +104,12 @@ function readJsonConfig(configPath: string, warn: boolean): SandboxConfigFile {
   }
 }
 
-/** The caller chooses the config paths; this package does not know host conventions. */
-export function loadConfig(globalPath: string, projectPath: string): SandboxConfig {
-  return mergeConfigLayers(
-    DEFAULT_CONFIG,
-    readJsonConfig(globalPath, true),
-    readJsonConfig(projectPath, true),
-  );
+export function getConfigPath(): string {
+  return join(homedir(), ".agents", "sandbox.json");
+}
+
+export function loadConfig(): SandboxConfig {
+  return mergeConfig(DEFAULT_CONFIG, readJsonConfig(getConfigPath(), true));
 }
 
 function writeConfigFile(configPath: string, config: SandboxConfigFile): void {

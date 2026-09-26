@@ -15,7 +15,7 @@ import {
   resetSandbox,
 } from "sandbox";
 
-const config = loadConfig(globalConfigPath, projectConfigPath);
+const config = loadConfig();
 const allowances = { domains: [], readPaths: [], writePaths: [] };
 if (config.enabled) await initializeSandbox(config, allowances);
 // The host supplies a shell and runs the wrapped command with its own process adapter.
@@ -24,9 +24,8 @@ const wrapped = await wrapWithSandbox(command, shell);
 // On shutdown: await resetSandbox();
 ```
 
-Hosts supply the two JSON file paths. Layered arrays combine in global-then-
-project order and fall back to defaults only if both layers omit them. Config
-writers accept one file path and add one rule without writing defaults.
+Configuration is read only from `~/.agents/sandbox.json`; absent settings use
+built-in defaults. Config writers accept one file path and add one rule without writing defaults.
 `resolveAllowances` merges session rules without mutating config; writes imply
 reads. The runtime wrapper does not spawn processes or prompt users: the host
 handles its own shell, UI, timeouts, aborts, and process cleanup.

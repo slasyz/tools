@@ -28,10 +28,8 @@ the same PATH as your shell.
 
 ## Configure
 
-Settings come from `~/.pi/agent/sandbox.json` (global) and `<cwd>/.pi/sandbox.json`
-(project). Scalar values in the project file take precedence. Permission arrays
-are combined and deduplicated; built-in defaults apply only if neither file
-configures that array. An explicit `[]` turns off the default for that array.
+Settings come only from `~/.agents/sandbox.json`. Built-in defaults apply
+when a setting is absent. An explicit `[]` turns off the default for that array.
 See [`sandbox.json`](./sandbox.json) for a small sample.
 
 ```json
@@ -68,8 +66,8 @@ pi --no-sandbox                  disable sandboxing for this invocation
 /sandbox-allow write <path>      ask to allow writes to a path
 ```
 
-Prompts can abort, allow for this session, write a project rule, or write a
-global rule. Prompts without a UI abort. Write grants also grant reads.
+Prompts can abort, allow for this session, or save a rule in `~/.agents/sandbox.json`.
+Prompts without a UI abort. Write grants also grant reads.
 `denyWrite` always overrides `allowWrite`; it is never prompted. A grant that
 still matches `denyWrite` produces a warning. `denyRead` is not a hard block
 for the direct Pi read tool: a read grant adds the path to `allowRead`.
