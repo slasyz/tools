@@ -29,6 +29,3 @@ built-in defaults. Config writers accept one file path and add one rule without 
 `resolveAllowances` merges session rules without mutating config; writes imply
 reads. The runtime wrapper does not spawn processes or prompt users: the host
 handles its own shell, UI, timeouts, aborts, and process cleanup.
-
-Based on [Chris Arderne's pi-sandbox](https://github.com/carderne/pi-sandbox),
-under the MIT License; see [LICENSE](./LICENSE).

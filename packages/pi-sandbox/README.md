@@ -89,9 +89,3 @@ entire patch is rejected.
 The `apply_patch` tool reads and writes files in the Pi process. These direct
 writes are not contained by the subprocess OS sandbox; the checks above are
 the approval policy that controls them.
-
-## Attribution
-
-Based on [Mario Zechner's Pi sandbox example](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/sandbox/index.ts)
-and [Chris Arderne's pi-sandbox](https://github.com/carderne/pi-sandbox), both
-under the MIT License. See [LICENSE](./LICENSE).

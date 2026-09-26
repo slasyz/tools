@@ -14,15 +14,7 @@
 		"pi-mono",
 		"typescript"
 	],
-	"homepage": "https://github.com/code-yeongyu/pi-apply-patch",
-	"bugs": {
-		"url": "https://github.com/code-yeongyu/pi-apply-patch/issues"
-	},
 	"license": "MIT",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/code-yeongyu/pi-apply-patch.git"
-	},
 	"type": "module",
 	"main": "./index.ts",
 	"exports": {

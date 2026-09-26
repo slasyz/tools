@@ -1,6 +1,6 @@
 # pi-apply-patch
 
-This repository ([`slasyz/pi-apply-patch`](https://github.com/slasyz/pi-apply-patch)) is a fork of the upstream repository ([`code-yeongyu/pi-apply-patch`](https://github.com/code-yeongyu/pi-apply-patch)). It adds authorization hooks that let other extensions and embedders inspect and approve the complete parser-derived mutation plan before preview reads or filesystem changes occur, plus the `getApplyPatchMutations` helper for mutation extraction.
+This workspace package adds authorization hooks that let other extensions and embedders inspect and approve the complete parser-derived mutation plan before preview reads or filesystem changes occur, plus the `getApplyPatchMutations` helper for mutation extraction.
 
 Codex-style `apply_patch` tool extension for the [pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). It registers a freeform grammar patch tool for OpenAI GPT-family models and swaps out `write` / `edit` while those models are active.
 
@@ -78,21 +78,11 @@ Use `getApplyPatchMutations(patchText)` when only parser-validated mutation extr
 
 ## Installation
 
-The package targets the [`pi`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) coding agent. Pi loads extensions from `~/.pi/agent/extensions/`, project `.pi/extensions/`, or via the `--extension` / `-e` CLI flag.
+The package targets the [`pi`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) coding agent. Install it from the repository checkout:
 
 ```bash
-# 1. From npm (once published)
-pi install npm:@code-yeongyu/pi-apply-patch
-
-# 2. From git
-pi install git:github.com/code-yeongyu/pi-apply-patch
-
-# 3. Manual placement
-git clone https://github.com/code-yeongyu/pi-apply-patch ~/.pi/agent/extensions/pi-apply-patch
-cd ~/.pi/agent/extensions/pi-apply-patch && npm install
-
-# 4. Dev / one-shot test
-pi -e /path/to/pi-apply-patch/index.ts
+pnpm install
+pi install "$(pwd)/packages/pi-apply-patch"
 ```
 
 After installation, restart pi or run `/reload` inside an interactive session.
@@ -122,22 +112,3 @@ pi -e ./index.ts
 ```
 
 The test suite uses vitest. TypeScript is strict, Node-only, and uses ESM imports with `.js` suffixes.
-
-## Origin
-
-Ported from `packages/coding-agent/src/core/extensions/builtin/gpt-apply-patch.ts` in `code-yeongyu/senpi-mono`. The patch grammar and tool descriptions mirror Codex.
-
-## License
-
-[MIT](LICENSE).
-
-## Related
-
-- [senpi](https://github.com/code-yeongyu/senpi) — the fork/runtime these extensions are extracted from.
-- [Ultraworkers Discord](https://discord.gg/PUwSMR9XNk) — community link from the senpi README.
-- [Dori](https://sisyphuslabs.ai) — the product powered by senpi under the hood.
-
-## Acknowledgements
-
-- **Mario Zechner** ([@badlogic](https://github.com/badlogic)) — author of [pi-mono](https://github.com/badlogic/pi-mono) and the pi-coding-agent extension API this package targets.
-- **OpenAI Codex** — reference `apply_patch` tool grammar and patch language.
