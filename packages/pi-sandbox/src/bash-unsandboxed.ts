@@ -16,9 +16,24 @@ import { Box, Container, SelectList, Spacer, Text, type SelectItem } from "@eare
 
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
 
-type ApprovalResult = "approved" | "rejected" | "cancelled";
+type ApprovalResult = "approved" | "rejected" | "cancelled" | "too-long";
+
+// BB limits extension UI messages to 8192 characters. Never truncate a command being approved.
+const RPC_PERMISSION_MESSAGE_MAX_LENGTH = 8192;
 
 async function requestApproval(ctx: ExtensionContext, command: string): Promise<ApprovalResult> {
+  if (ctx.mode === "rpc") {
+    const message = `Working directory: ${ctx.cwd}\n\nCommand:\n${command}`;
+    if (message.length > RPC_PERMISSION_MESSAGE_MAX_LENGTH) return "too-long";
+
+    const approved = await ctx.ui.confirm("Run command outside the sandbox?", message, {
+      signal: ctx.signal,
+      timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS,
+    });
+    // RPC confirm returns false for rejection, cancellation, and timeout alike.
+    return approved ? "approved" : "cancelled";
+  }
+
   if (ctx.mode !== "tui") {
     const choice = await ctx.ui.select(
       `Run command outside the sandbox?\nWorking directory: ${ctx.cwd}\n\n${command}`,
@@ -124,11 +139,13 @@ export default function (pi: ExtensionAPI) {
 
       if (approval !== "approved") {
         const text =
-          approval === "rejected"
-            ? "Command not run: user denied permission."
-            : ctx.mode === "rpc"
-              ? "Command not run: approval was cancelled or timed out. RPC clients must handle extension_ui_request and reply with extension_ui_response."
-              : "Command not run: no approval was received because the permission request was cancelled.";
+          approval === "too-long"
+            ? "Command not run: the command and working directory are too long to display in the RPC approval prompt."
+            : approval === "rejected"
+              ? "Command not run: user denied permission."
+              : ctx.mode === "rpc"
+                ? "Command not run: unsandboxed execution was not approved (denied, cancelled, or timed out)."
+                : "Command not run: no approval was received because the permission request was cancelled.";
         return {
           content: [{ type: "text", text }],
           details: undefined,
