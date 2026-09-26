@@ -1,2 +1,7 @@
 packages:
   - "packages/*"
+  - "!packages/pi-sandbox-old"
+allowBuilds:
+  "@google/genai": false
+  esbuild: true
+  protobufjs: false
