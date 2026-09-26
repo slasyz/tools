@@ -14,6 +14,8 @@ export interface PermissionPromptResult {
   value: string;
 }
 
+export const RPC_PERMISSION_PROMPT_TIMEOUT_MS = 5 * 60_000;
+
 interface PromptOption {
   label: string;
   key: string;
@@ -34,6 +36,81 @@ const PERMISSION_OPTIONS: PromptOption[] = [
   },
 ];
 
+const RPC_SESSION_OPTION = "Allow for this session only";
+const RPC_EDIT_SESSION_OPTION = "Edit rule and allow for this session";
+const RPC_ABORT_OPTION = "Abort (keep blocked)";
+const RPC_GLOBAL_OPTION = "Allow for all projects";
+const RPC_EDIT_GLOBAL_OPTION = "Edit rule and allow for all projects";
+
+async function showRpcPermissionPrompt(
+  ctx: ExtensionContext,
+  title: string,
+  originalValue: string,
+  validateValue: (value: string) => string | null,
+): Promise<PermissionPromptResult> {
+  const dialogOptions = {
+    signal: ctx.signal,
+    timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS,
+  };
+  const selected = await ctx.ui.select(
+    title,
+    [
+      RPC_SESSION_OPTION,
+      RPC_EDIT_SESSION_OPTION,
+      RPC_ABORT_OPTION,
+      RPC_GLOBAL_OPTION,
+      RPC_EDIT_GLOBAL_OPTION,
+    ],
+    dialogOptions,
+  );
+
+  if (!selected || selected === RPC_ABORT_OPTION) {
+    return { action: "abort", value: originalValue };
+  }
+
+  const isSession = selected === RPC_SESSION_OPTION || selected === RPC_EDIT_SESSION_OPTION;
+  const isGlobal = selected === RPC_GLOBAL_OPTION || selected === RPC_EDIT_GLOBAL_OPTION;
+  if (!isSession && !isGlobal) return { action: "abort", value: originalValue };
+
+  const action: Exclude<PermissionChoice, "abort"> = isGlobal ? "global" : "session";
+  let value = originalValue;
+
+  if (selected === RPC_EDIT_SESSION_OPTION || selected === RPC_EDIT_GLOBAL_OPTION) {
+    while (true) {
+      const editedValue = await ctx.ui.input(
+        `Edit permission rule for: ${originalValue}`,
+        originalValue,
+        dialogOptions,
+      );
+      if (editedValue === undefined) {
+        return { action: "abort", value: originalValue };
+      }
+
+      value = editedValue.trim();
+      const validationError = validateValue(value);
+      if (!validationError) break;
+      ctx.ui.notify(validationError, "error");
+    }
+  } else {
+    const validationError = validateValue(value);
+    if (validationError) {
+      ctx.ui.notify(validationError, "error");
+      return { action: "abort", value: originalValue };
+    }
+  }
+
+  if (action === "global") {
+    const confirmed = await ctx.ui.confirm(
+      "Allow for all projects?",
+      `Save "${value}" to ~/.agents/sandbox.json?`,
+      dialogOptions,
+    );
+    if (!confirmed) return { action: "abort", value: originalValue };
+  }
+
+  return { action, value };
+}
+
 export async function showPermissionPrompt(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -44,6 +121,12 @@ export async function showPermissionPrompt(
   if (!ctx.hasUI) return { action: "abort", value: originalValue };
 
   pi.events.emit("request-attention", { message: "Sandbox permission required" });
+
+  if (ctx.mode === "rpc") {
+    return showRpcPermissionPrompt(ctx, title, originalValue, validateValue);
+  }
+
+  if (ctx.mode !== "tui") return { action: "abort", value: originalValue };
 
   const result = await ctx.ui.custom<PermissionPromptResult>((tui, theme, _kb, done) => {
     const input = new Input();

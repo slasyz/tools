@@ -14,11 +14,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Box, Container, SelectList, Spacer, Text, type SelectItem } from "@earendil-works/pi-tui";
 
+import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
+
 async function requestApproval(ctx: ExtensionContext, command: string): Promise<boolean> {
   if (ctx.mode !== "tui") {
     const choice = await ctx.ui.select(
       `Run command outside the sandbox?\nWorking directory: ${ctx.cwd}\n\n${command}`,
       ["Approve", "Reject"],
+      { signal: ctx.signal, timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS },
     );
     return choice === "Approve";
   }

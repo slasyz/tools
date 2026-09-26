@@ -68,7 +68,10 @@ pi --no-sandbox                  disable sandboxing for this invocation
 ```
 
 Prompts can abort, allow for this session, or save a rule in `~/.agents/sandbox.json`.
-Prompts without a UI abort. Write grants also grant reads.
+Prompts without a UI abort. In RPC mode, permission prompts use Pi's extension UI
+protocol and time out after five minutes. The RPC client must handle
+`extension_ui_request` records and send matching `extension_ui_response` records;
+otherwise the request is denied when it times out. Write grants also grant reads.
 The `bash_unsandboxed` tool runs a command outside the sandbox only after explicit
 user approval. Without a UI for approval, it does not run the command.
 `denyWrite` always overrides `allowWrite`; it is never prompted. A grant that
