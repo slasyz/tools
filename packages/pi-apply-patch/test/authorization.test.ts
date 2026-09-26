@@ -1,13 +1,17 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { createEventBus, type EventBus } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+	APPLY_PATCH_AUTHORIZATION_EVENT,
+	type ApplyPatchAuthorizationEvent,
 	type ApplyPatchAuthorizationRequest,
+	type ApplyPatchExtensionAPI,
 	createApplyPatchTool,
 	getApplyPatchMutations,
+	isApplyPatchAuthorizationEvent,
 	PatchParseError,
 	registerApplyPatchExtension,
-	type ApplyPatchExtensionAPI,
 } from "../src/index.js";
 
 const tempDirectories: string[] = [];
@@ -25,6 +29,38 @@ async function executePatch(
 ): Promise<void> {
 	const tool = createApplyPatchTool(authorize ? { authorize } : {});
 	await tool.execute("authorization-test", { input: patchText }, undefined, undefined, { cwd: directory } as never);
+}
+
+function createRegisteredTool(events: EventBus): ReturnType<typeof createApplyPatchTool> {
+	let registeredTool: ReturnType<typeof createApplyPatchTool> | undefined;
+	registerApplyPatchExtension({
+		events,
+		registerTool(tool) {
+			registeredTool = tool;
+		},
+		on() {
+			return () => {};
+		},
+		getActiveTools() {
+			return [];
+		},
+		setActiveTools() {},
+	});
+	if (!registeredTool) {
+		throw new Error("apply_patch tool was not registered");
+	}
+	return registeredTool;
+}
+
+function requireAuthorizationEvent(data: unknown): ApplyPatchAuthorizationEvent {
+	if (!isApplyPatchAuthorizationEvent(data)) {
+		throw new Error("invalid apply_patch authorization event");
+	}
+	return data;
+}
+
+async function executeRegisteredPatch(tool: ReturnType<typeof createApplyPatchTool>, cwd: string, input: string) {
+	await tool.execute("event-authorization-test", { input }, undefined, undefined, { cwd } as never);
 }
 
 afterEach(async () => {
@@ -53,6 +89,178 @@ describe("apply_patch authorization", () => {
 
 		// then
 		expect(await readFile(path.join(directory, "sample.txt"), "utf-8")).toBe("after\n");
+	});
+
+	it("#given a registered tool with no authorization listeners #when tool executes #then applies the patch", async () => {
+		// given
+		const directory = await createTempDirectory();
+		const events = createEventBus();
+		const tool = createRegisteredTool(events);
+		const patch = `*** Begin Patch
+*** Add File: standalone.txt
++content
+*** End Patch`;
+
+		// when
+		await executeRegisteredPatch(tool, directory, patch);
+
+		// then
+		expect(await readFile(path.join(directory, "standalone.txt"), "utf-8")).toBe("content\n");
+	});
+
+	it("#given event authorizers #when one rejects #then all settle and the complete patch is blocked", async () => {
+		// given
+		const directory = await createTempDirectory();
+		const events = createEventBus();
+		const tool = createRegisteredTool(events);
+		let slowAuthorizerFinished = false;
+		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+			const event = requireAuthorizationEvent(data);
+			event.waitUntil(
+				() =>
+					new Promise<void>((resolve) => {
+						setTimeout(() => {
+							slowAuthorizerFinished = true;
+							resolve();
+						}, 10);
+					}),
+			);
+		});
+		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+			const event = requireAuthorizationEvent(data);
+			event.waitUntil(() => Promise.reject(new Error("event denied")));
+		});
+		const patch = `*** Begin Patch
+*** Add File: first.txt
++one
+*** Add File: second.txt
++two
+*** End Patch`;
+
+		// when / then
+		await expect(executeRegisteredPatch(tool, directory, patch)).rejects.toThrow("event denied");
+		expect(slowAuthorizerFinished).toBe(true);
+		await expect(readFile(path.join(directory, "first.txt"), "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
+		await expect(readFile(path.join(directory, "second.txt"), "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
+	});
+
+	it("#given an event authorizer #when it throws synchronously #then the complete patch is blocked before preview", async () => {
+		// given
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "existing.txt"), "before\n", "utf-8");
+		const events = createEventBus();
+		const tool = createRegisteredTool(events);
+		let updates = 0;
+		const authorize = () => {
+			throw new Error("synchronous event denial");
+		};
+		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+			const event = requireAuthorizationEvent(data);
+			event.waitUntil(() => authorize());
+		});
+		const patch = `*** Begin Patch
+*** Add File: denied.txt
++content
+*** Update File: existing.txt
+@@
+-before
++after
+*** End Patch`;
+
+		// when / then
+		await expect(
+			tool.execute(
+				"synchronous-event-authorization-test",
+				{ input: patch },
+				undefined,
+				() => {
+					updates += 1;
+				},
+				{ cwd: directory } as never,
+			),
+		).rejects.toThrow("synchronous event denial");
+		expect(updates).toBe(0);
+		await expect(readFile(path.join(directory, "denied.txt"), "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await readFile(path.join(directory, "existing.txt"), "utf-8")).toBe("before\n");
+	});
+
+	it("#given synchronous and asynchronous event authorizers #when both allow #then applies the patch", async () => {
+		// given
+		const directory = await createTempDirectory();
+		const events = createEventBus();
+		const tool = createRegisteredTool(events);
+		const completed: string[] = [];
+		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+			const event = requireAuthorizationEvent(data);
+			event.waitUntil(() => {
+				completed.push("synchronous");
+			});
+			event.waitUntil(async () => {
+				await Promise.resolve();
+				completed.push("asynchronous");
+			});
+		});
+		const patch = `*** Begin Patch
+*** Add File: allowed.txt
++content
+*** End Patch`;
+
+		// when
+		await executeRegisteredPatch(tool, directory, patch);
+
+		// then
+		expect(completed).toEqual(["synchronous", "asynchronous"]);
+		expect(await readFile(path.join(directory, "allowed.txt"), "utf-8")).toBe("content\n");
+	});
+
+	it("#given an event authorizer #when it rejects #then it runs after parsing and before preview", async () => {
+		// given
+		const directory = await createTempDirectory();
+		const events = createEventBus();
+		const tool = createRegisteredTool(events);
+		let requests = 0;
+		let updates = 0;
+		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+			const event = requireAuthorizationEvent(data);
+			requests += 1;
+			event.waitUntil(() => Promise.reject(new Error("event stopped preview")));
+		});
+		const patch = `*** Begin Patch
+*** Delete File: .
+*** End Patch`;
+
+		// when / then
+		await expect(
+			tool.execute(
+				"event-before-preview-test",
+				{ input: patch },
+				undefined,
+				() => {
+					updates += 1;
+				},
+				{ cwd: directory } as never,
+			),
+		).rejects.toThrow("event stopped preview");
+		expect(requests).toBe(1);
+		expect(updates).toBe(0);
+	});
+
+	it("#given malformed and empty patches #when a registered tool executes #then no event authorization is requested", async () => {
+		// given
+		const directory = await createTempDirectory();
+		const events = createEventBus();
+		const tool = createRegisteredTool(events);
+		let requests = 0;
+		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, () => {
+			requests += 1;
+		});
+
+		// when / then
+		await expect(executeRegisteredPatch(tool, directory, "not a patch")).rejects.toBeInstanceOf(PatchParseError);
+		await expect(executeRegisteredPatch(tool, directory, "*** Begin Patch\n*** End Patch")).rejects.toBeInstanceOf(
+			PatchParseError,
+		);
+		expect(requests).toBe(0);
 	});
 
 	it("#given all patch operations #when authorized #then callback receives ordered parser-derived mutations once", async () => {
@@ -183,9 +391,9 @@ describe("apply_patch authorization", () => {
 
 		// when / then
 		await expect(executePatch(directory, "not a patch", authorize)).rejects.toBeInstanceOf(PatchParseError);
-		await expect(
-			executePatch(directory, "*** Begin Patch\n*** End Patch", authorize),
-		).rejects.toBeInstanceOf(PatchParseError);
+		await expect(executePatch(directory, "*** Begin Patch\n*** End Patch", authorize)).rejects.toBeInstanceOf(
+			PatchParseError,
+		);
 		expect(calls).toBe(0);
 	});
 
@@ -196,14 +404,14 @@ describe("apply_patch authorization", () => {
 +one
 *** Delete File: same.txt
 *** End Patch`;
-		const regex-likeInvalidPatch = "*** Add File: plausible.txt\n+content";
+		const regexLikeInvalidPatch = "*** Add File: plausible.txt\n+content";
 
 		// when / then
 		expect(getApplyPatchMutations(validPatch)).toEqual([
 			{ operation: "add", path: "same.txt" },
 			{ operation: "delete", path: "same.txt" },
 		]);
-		expect(() => getApplyPatchMutations(regex-likeInvalidPatch)).toThrow(PatchParseError);
+		expect(() => getApplyPatchMutations(regexLikeInvalidPatch)).toThrow(PatchParseError);
 	});
 
 	it("#given configurable extension registration #when registered #then forwards authorization to the tool", async () => {
@@ -215,10 +423,18 @@ describe("apply_patch authorization", () => {
 *** End Patch`;
 		const registeredTools: Array<ReturnType<typeof createApplyPatchTool>> = [];
 		const api = {
+			events: {
+				emit() {},
+				on() {
+					return () => {};
+				},
+			},
 			registerTool(tool: ReturnType<typeof createApplyPatchTool>) {
 				registeredTools.push(tool);
 			},
-			on() {},
+			on() {
+				return () => {};
+			},
 			getActiveTools() {
 				return [];
 			},

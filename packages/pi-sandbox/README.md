@@ -9,12 +9,13 @@ OS-level sandboxing and permission prompts for [Pi](https://pi.dev/) on macOS an
 
 This is a private workspace package, not an npm release. Clone the repository,
 install its workspace dependencies with `pnpm install`, then load the local Pi
-package from that checkout:
+packages from that checkout:
 
 ```bash
 git clone <your-repository-git-url> tools
 cd tools
 pnpm install
+pi install "$(pwd)/packages/pi-apply-patch"
 pi install "$(pwd)/packages/pi-sandbox"
 ```
 
@@ -74,9 +75,17 @@ user approval. Without a UI for approval, it does not run the command.
 still matches `denyWrite` produces a warning. `denyRead` is not a hard block
 for the direct Pi read tool: a read grant adds the path to `allowRead`.
 
-The extension registers `pi-apply-patch` for supported GPT models. Every
-source and destination path in a patch is checked **before** preview reads or
-changes start. If any path is denied, the entire patch is rejected.
+`pi-apply-patch` is the sole owner of the `apply_patch` tool registration, so
+both packages must be installed and enabled. Pi does not load a dependency as
+a Pi extension. `pi-sandbox` listens for parser-derived authorization requests
+and attaches its authorization promise synchronously with the event's
+`waitUntil(...)` callback. Every source and destination path in a patch is
+checked **before** preview reads or changes start. If any path is denied, the
+entire patch is rejected.
+
+The `apply_patch` tool reads and writes files in the Pi process. These direct
+writes are not contained by the subprocess OS sandbox; the checks above are
+the approval policy that controls them.
 
 ## Attribution
 

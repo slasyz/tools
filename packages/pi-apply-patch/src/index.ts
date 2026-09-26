@@ -54,14 +54,41 @@ export type ApplyPatchAuthorizationRequest = {
 	mutations: ApplyPatchMutation[];
 };
 
+export const APPLY_PATCH_AUTHORIZATION_EVENT = "pi-apply-patch:authorize";
+
+export type ApplyPatchAuthorizationEvent = ApplyPatchAuthorizationRequest & {
+	waitUntil: (authorize: () => PromiseLike<void> | void) => void;
+};
+
+export function isApplyPatchAuthorizationEvent(data: unknown): data is ApplyPatchAuthorizationEvent {
+	return Boolean(
+		data &&
+			typeof data === "object" &&
+			"cwd" in data &&
+			typeof data.cwd === "string" &&
+			"patchText" in data &&
+			typeof data.patchText === "string" &&
+			"mutations" in data &&
+			Array.isArray(data.mutations) &&
+			"waitUntil" in data &&
+			typeof data.waitUntil === "function",
+	);
+}
+
 export type ApplyPatchAuthorize = (request: ApplyPatchAuthorizationRequest) => Promise<void> | void;
 
 export type ApplyPatchToolOptions = {
 	authorize?: ApplyPatchAuthorize;
 };
 
-export type ApplyPatchExtensionAPI = Pick<ExtensionAPI, "on" | "getActiveTools" | "setActiveTools"> & {
+export type ApplyPatchExtensionAPI = Pick<ExtensionAPI, "events" | "on" | "getActiveTools" | "setActiveTools"> & {
 	registerTool: (tool: ApplyPatchToolDefinition) => void;
+};
+
+type ApplyPatchAuthorizationEvents = Pick<ExtensionAPI["events"], "emit">;
+
+type CreateApplyPatchToolOptions = ApplyPatchToolOptions & {
+	authorizationEvents?: ApplyPatchAuthorizationEvents;
 };
 
 type ApplyPatchParams = {
@@ -1120,6 +1147,54 @@ function createAuthorizationRequest(
 	return { cwd, patchText, mutations: getParsedPatchMutations(hunks) };
 }
 
+async function authorizeParsedPatch(
+	cwd: string,
+	patchText: string,
+	hunks: ParsedPatch[],
+	options: CreateApplyPatchToolOptions,
+): Promise<void> {
+	const authorizations: Promise<void>[] = [];
+	if (options.authorize) {
+		try {
+			authorizations.push(Promise.resolve(options.authorize(createAuthorizationRequest(cwd, patchText, hunks))));
+		} catch (error) {
+			authorizations.push(Promise.reject(error));
+		}
+	}
+
+	if (options.authorizationEvents) {
+		let acceptingAuthorizations = true;
+		const request = createAuthorizationRequest(cwd, patchText, hunks);
+		for (const mutation of request.mutations) {
+			Object.freeze(mutation);
+		}
+		Object.freeze(request.mutations);
+		const event: ApplyPatchAuthorizationEvent = Object.freeze({
+			...request,
+			waitUntil(authorize: () => PromiseLike<void> | void): void {
+				if (!acceptingAuthorizations) {
+					throw new Error("apply_patch authorization must be attached synchronously");
+				}
+				authorizations.push(Promise.resolve().then(() => authorize()));
+			},
+		});
+
+		try {
+			options.authorizationEvents.emit(APPLY_PATCH_AUTHORIZATION_EVENT, event);
+		} catch (error) {
+			authorizations.push(Promise.reject(error));
+		} finally {
+			acceptingAuthorizations = false;
+		}
+	}
+
+	const results = await Promise.allSettled(authorizations);
+	const rejection = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+	if (rejection) {
+		throw rejection.reason;
+	}
+}
+
 function splitFileLines(content: string): string[] {
 	const lines = normalizePatchText(content).split("\n");
 	if (lines[lines.length - 1] === "") {
@@ -1428,7 +1503,7 @@ function syncToolset(
 	pi.setActiveTools(replaceApplyPatchWithEditTools(currentToolNames));
 }
 
-export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): ApplyPatchToolDefinition {
+export function createApplyPatchTool(options: CreateApplyPatchToolOptions = {}): ApplyPatchToolDefinition {
 	const tool = defineTool({
 		name: "apply_patch",
 		label: "ApplyPatch",
@@ -1453,7 +1528,7 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 			}
 
 			const parsedHunks = parseNonEmptyPatch(normalizedParams.input);
-			await options.authorize?.(createAuthorizationRequest(ctx.cwd, normalizedParams.input, parsedHunks));
+			await authorizeParsedPatch(ctx.cwd, normalizedParams.input, parsedHunks, options);
 
 			const initialProgress = { applied: 0, failed: 0, total: parsedHunks.length };
 			const pendingUpdate = await createPendingPatchUpdate(
@@ -1469,23 +1544,19 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 			});
 
 			const preview = pendingUpdate.details?.preview;
-			const result = await applyParsedPatchDetailed(
-				ctx.cwd,
-				parsedHunks,
-				async (progress) => {
-					const progressUpdate = await createPendingPatchUpdate(
-						ctx.cwd,
-						normalizedParams.input,
-						progress,
-						preview,
-						parsedHunks,
-					);
-					onUpdate?.({
-						content: [{ type: "text", text: progressUpdate.text }],
-						details: progressUpdate.details,
-					});
-				},
-			);
+			const result = await applyParsedPatchDetailed(ctx.cwd, parsedHunks, async (progress) => {
+				const progressUpdate = await createPendingPatchUpdate(
+					ctx.cwd,
+					normalizedParams.input,
+					progress,
+					preview,
+					parsedHunks,
+				);
+				onUpdate?.({
+					content: [{ type: "text", text: progressUpdate.text }],
+					details: progressUpdate.details,
+				});
+			});
 			if (result.failures.length > 0) {
 				const failureLines = result.failures.map(
 					(failure) => `- ${failure.filePath} (${failure.operation}): ${failure.message}`,
@@ -1579,7 +1650,7 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 }
 
 export function registerApplyPatchExtension(pi: ApplyPatchExtensionAPI, options: ApplyPatchToolOptions = {}): void {
-	pi.registerTool(createApplyPatchTool(options));
+	pi.registerTool(createApplyPatchTool({ ...options, authorizationEvents: pi.events }));
 
 	pi.on("session_start", async (_event, ctx) => {
 		syncToolset(pi, ctx.model);

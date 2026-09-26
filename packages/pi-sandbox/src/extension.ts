@@ -7,9 +7,10 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+  APPLY_PATCH_AUTHORIZATION_EVENT,
   type ApplyPatchAuthorizationRequest,
-  registerApplyPatchExtension,
-} from "pi-apply-patch/src/index.ts";
+  isApplyPatchAuthorizationEvent,
+} from "pi-apply-patch";
 import {
   addDomainToConfig,
   addReadPathToConfig,
@@ -30,9 +31,9 @@ import {
   supportsNodeEnvProxy,
 } from "sandbox";
 
-import { createSandboxedBashOps } from "./bash.ts";
 import registerUnsandboxedBash from "./bash-unsandboxed.ts";
-import { resolveApplyPatchWritePaths } from "./policy.ts";
+import { createSandboxedBashOps } from "./bash.ts";
+import { authorizeApplyPatchRequest } from "./policy.ts";
 import {
   formatSandboxConfiguration,
   type PermissionPromptResult,
@@ -126,34 +127,28 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function authorizeApplyPatch(request: ApplyPatchAuthorizationRequest): Promise<void> {
-    if (!sandboxEnabled) return;
-    if (!sandboxInitialized) throw new Error("Sandbox is unavailable; patch blocked");
-
     const config = loadConfig();
-    if (!config.enabled) return;
-    if (!sessionContext) throw new Error("Sandbox: session context is unavailable");
-
-    const paths = resolveApplyPatchWritePaths(request.cwd, request.mutations);
-    const denyWrite = config.filesystem?.denyWrite ?? [];
-    const deniedPath = paths.find((path) => matchesPattern(path, denyWrite));
-    if (deniedPath) {
-      throw new Error(
-        `Sandbox: write access denied for "${deniedPath}" (in denyWrite). ` +
-          `To change this, edit denyWrite in:\n  ${getConfigPath()}`,
-      );
-    }
-
-    for (const path of paths) {
-      if (!shouldPromptForWrite(path, effectiveWritePaths())) continue;
-      const choice = await promptWriteBlock(pi, sessionContext, path);
-      if (choice.action === "abort") {
-        throw new Error(`Sandbox: write access denied for "${path}" (not in allowWrite)`);
-      }
-      await applyChoice(choice.action, "write", choice.value);
-    }
+    await authorizeApplyPatchRequest(request, {
+      sandboxEnabled,
+      sandboxInitialized,
+      config,
+      configPath: getConfigPath(),
+      sessionContextAvailable: sessionContext !== undefined,
+      effectiveWritePaths,
+      promptWrite: async (path) => {
+        if (!sessionContext) {
+          return { action: "abort", value: path };
+        }
+        return promptWriteBlock(pi, sessionContext, path);
+      },
+      applyWriteChoice: (choice, value) => applyChoice(choice, "write", value),
+    });
   }
 
-  registerApplyPatchExtension(pi, { authorize: authorizeApplyPatch });
+  pi.events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+    if (!isApplyPatchAuthorizationEvent(data)) return;
+    data.waitUntil(() => authorizeApplyPatch(data));
+  });
   registerUnsandboxedBash(pi);
 
   pi.registerTool({

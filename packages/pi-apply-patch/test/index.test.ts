@@ -24,6 +24,12 @@ const identityTheme = {
 	bold: (text: string) => text,
 	inverse: (text: string) => text,
 };
+const noOpEvents = {
+	emit(_channel: string, _data: unknown) {},
+	on(_channel: string, _handler: (data: unknown) => void) {
+		return () => {};
+	},
+};
 type ApplyPatchTool = ReturnType<typeof createApplyPatchTool>;
 type ApplyPatchUpdate = Parameters<NonNullable<Parameters<ApplyPatchTool["execute"]>[3]>>[0];
 type ToolsetModel = { provider: string; id: string; api?: string };
@@ -47,14 +53,16 @@ function createToolsetTestApi(initialActiveTools: string[]): {
 	const setActiveToolsCalls: string[][] = [];
 	const handlers = new Map<string, ToolsetHandler[]>();
 	const api: ApplyPatchExtensionAPI = {
+		events: noOpEvents,
 		registerTool() {},
 		on(...args: unknown[]) {
 			const eventName = args[0];
 			const handler = args[1];
 			if (typeof eventName !== "string" || !isToolsetHandler(handler)) {
-				return;
+				return () => {};
 			}
 			handlers.set(eventName, [...(handlers.get(eventName) ?? []), handler]);
+			return () => {};
 		},
 		getActiveTools() {
 			return [...activeTools];
@@ -107,12 +115,15 @@ describe("pi-apply-patch", () => {
 		let capturedDescription: string | undefined;
 		let capturedFreeform: FreeformToolFormat | undefined;
 		const extensionApi = {
+			events: noOpEvents,
 			registerTool(tool: ReturnType<typeof createApplyPatchTool>) {
 				capturedToolName = tool.name;
 				capturedDescription = tool.description;
 				capturedFreeform = tool.freeform;
 			},
-			on() {},
+			on() {
+				return () => {};
+			},
 			getActiveTools() {
 				return ["read", "write", "edit"];
 			},
