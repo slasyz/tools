@@ -68,6 +68,8 @@ pi --no-sandbox                  disable sandboxing for this invocation
 
 Prompts can abort, allow for this session, or save a rule in `~/.agents/sandbox.json`.
 Prompts without a UI abort. Write grants also grant reads.
+The `bash_unsandboxed` tool runs a command outside the sandbox only after explicit
+user approval. Without a UI for approval, it does not run the command.
 `denyWrite` always overrides `allowWrite`; it is never prompted. A grant that
 still matches `denyWrite` produces a warning. `denyRead` is not a hard block
 for the direct Pi read tool: a read grant adds the path to `allowRead`.

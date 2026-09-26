@@ -31,6 +31,7 @@ import {
 } from "sandbox";
 
 import { createSandboxedBashOps } from "./bash.ts";
+import registerUnsandboxedBash from "./bash-unsandboxed.ts";
 import { resolveApplyPatchWritePaths } from "./policy.ts";
 import {
   formatSandboxConfiguration,
@@ -153,6 +154,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   registerApplyPatchExtension(pi, { authorize: authorizeApplyPatch });
+  registerUnsandboxedBash(pi);
 
   pi.registerTool({
     ...localBash,
