@@ -1,5 +1,3 @@
-import test from "node:test";
-
 import {
   createEventBus,
   type ExtensionAPI,
@@ -7,6 +5,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import assert from "node:assert/strict";
 import registerApplyPatchExtension from "pi-apply-patch";
+import { test } from "vitest";
 
 import registerSandboxExtension from "../src/extension.ts";
 

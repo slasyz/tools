@@ -63,15 +63,15 @@ export type ApplyPatchAuthorizationEvent = ApplyPatchAuthorizationRequest & {
 export function isApplyPatchAuthorizationEvent(data: unknown): data is ApplyPatchAuthorizationEvent {
 	return Boolean(
 		data &&
-			typeof data === "object" &&
-			"cwd" in data &&
-			typeof data.cwd === "string" &&
-			"patchText" in data &&
-			typeof data.patchText === "string" &&
-			"mutations" in data &&
-			Array.isArray(data.mutations) &&
-			"waitUntil" in data &&
-			typeof data.waitUntil === "function",
+		typeof data === "object" &&
+		"cwd" in data &&
+		typeof data.cwd === "string" &&
+		"patchText" in data &&
+		typeof data.patchText === "string" &&
+		"mutations" in data &&
+		Array.isArray(data.mutations) &&
+		"waitUntil" in data &&
+		typeof data.waitUntil === "function",
 	);
 }
 

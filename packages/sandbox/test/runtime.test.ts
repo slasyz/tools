@@ -1,7 +1,6 @@
-import test from "node:test";
-
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 import assert from "node:assert/strict";
+import { test } from "vitest";
 
 import { DEFAULT_CONFIG, mergeConfig } from "../src/config.ts";
 import {

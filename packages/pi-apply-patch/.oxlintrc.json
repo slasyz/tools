@@ -1,0 +1,16 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"categories": {
+		"correctness": "error"
+	},
+	"rules": {
+		"no-control-regex": "off",
+		"prefer-const": "error",
+		"typescript/consistent-type-imports": "error",
+		"typescript/no-empty-interface": "off",
+		"typescript/no-empty-object-type": "off",
+		"typescript/no-explicit-any": "error",
+		"typescript/no-non-null-assertion": "error",
+		"unicorn/prefer-node-protocol": "off"
+	}
+}

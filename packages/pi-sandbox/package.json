@@ -9,7 +9,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "vitest --run"
   },
   "dependencies": {
     "pi-apply-patch": "workspace:*",
@@ -17,7 +17,8 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.87.1",
-    "@earendil-works/pi-tui": "^0.87.1"
+    "@earendil-works/pi-tui": "^0.87.1",
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

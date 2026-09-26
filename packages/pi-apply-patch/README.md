@@ -8,14 +8,14 @@ Codex-style `apply_patch` tool extension for the [pi coding agent](https://githu
 
 The extension registers one LLM-callable tool: `apply_patch`. The tool accepts Codex patch envelopes and applies file additions, updates, deletions, and moves after resolving file paths against the current workspace.
 
-| Case | Result |
-|------|--------|
-| OpenAI GPT provider active | replaces `write` and `edit` with `apply_patch` |
-| Custom `openai-responses` GPT provider active | replaces `write` and `edit` with `apply_patch` |
-| Non-GPT model active | restores the original `write` and `edit` toolset |
-| Raw freeform patch input | accepted and applied |
-| JSON `{ "input": "..." }` patch input | accepted and applied |
-| Absolute or parent-escaping path | accepted and resolved by Node path semantics |
+| Case                                          | Result                                           |
+| --------------------------------------------- | ------------------------------------------------ |
+| OpenAI GPT provider active                    | replaces `write` and `edit` with `apply_patch`   |
+| Custom `openai-responses` GPT provider active | replaces `write` and `edit` with `apply_patch`   |
+| Non-GPT model active                          | restores the original `write` and `edit` toolset |
+| Raw freeform patch input                      | accepted and applied                             |
+| JSON `{ "input": "..." }` patch input         | accepted and applied                             |
+| Absolute or parent-escaping path              | accepted and resolved by Node path semantics     |
 
 ## Tool
 
@@ -48,10 +48,7 @@ callback inside a promise and awaits all results; any synchronous throw or
 rejection blocks the whole patch before preview reads or mutations begin.
 
 ```ts
-import {
-	APPLY_PATCH_AUTHORIZATION_EVENT,
-	isApplyPatchAuthorizationEvent,
-} from "pi-apply-patch";
+import { APPLY_PATCH_AUTHORIZATION_EVENT, isApplyPatchAuthorizationEvent } from "pi-apply-patch";
 
 pi.events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
 	if (!isApplyPatchAuthorizationEvent(data)) return;
