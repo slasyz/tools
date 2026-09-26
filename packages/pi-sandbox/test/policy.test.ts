@@ -7,57 +7,56 @@ import { canonicalizePath, DEFAULT_CONFIG } from "sandbox";
 import { test } from "vitest";
 
 import {
-  authorizeApplyPatchRequest,
-  resolveApplyPatchWritePaths,
-  type ApplyPatchAuthorizationPolicy,
+  authorizeSandboxRequest,
+  resolveSandboxFileAccesses,
+  type SandboxAuthorizationPolicy,
 } from "../src/policy.ts";
 
-test("resolves every apply_patch write path against the request cwd once", () => {
+test("resolves and deduplicates filesystem accesses against the request cwd", () => {
   const root = canonicalizePath(mkdtempSync(join(tmpdir(), "pi-sandbox-apply-patch-")));
   assert.deepEqual(
-    resolveApplyPatchWritePaths(root, [
-      { operation: "add", path: "new.txt" },
-      { operation: "delete", path: "old.txt" },
-      { operation: "update", path: "src.ts" },
-      { operation: "update", path: "before.ts", movePath: "nested/after.ts" },
-      { operation: "update", path: "src.ts" },
+    resolveSandboxFileAccesses(root, [
+      { kind: "write", path: "new.txt" },
+      { kind: "read", path: "old.txt" },
+      { kind: "write", path: "src.ts" },
+      { kind: "write", path: "src.ts" },
     ]),
     [
-      join(root, "new.txt"),
-      join(root, "old.txt"),
-      join(root, "src.ts"),
-      join(root, "before.ts"),
-      join(root, "nested", "after.ts"),
+      { kind: "write", path: join(root, "new.txt") },
+      { kind: "read", path: join(root, "old.txt") },
+      { kind: "write", path: join(root, "src.ts") },
     ],
   );
 });
 
 function createPolicy(
-  overrides: Partial<ApplyPatchAuthorizationPolicy> = {},
-): ApplyPatchAuthorizationPolicy {
+  overrides: Partial<SandboxAuthorizationPolicy> = {},
+): SandboxAuthorizationPolicy {
   return {
     sandboxEnabled: true,
     sandboxInitialized: true,
     config: DEFAULT_CONFIG,
     configPath: "/config/sandbox.json",
     sessionContextAvailable: true,
+    effectiveReadPaths: () => [],
     effectiveWritePaths: () => [],
+    promptRead: async (path) => ({ action: "abort", value: path }),
     promptWrite: async (path) => ({ action: "abort", value: path }),
-    applyWriteChoice: async () => {},
+    applyChoice: async () => {},
     ...overrides,
   };
 }
 
-test("rejects the complete apply_patch request when any path matches denyWrite", async () => {
+test("rejects the complete request when any write matches denyWrite", async () => {
   const root = canonicalizePath(mkdtempSync(join(tmpdir(), "pi-sandbox-denied-patch-")));
   let prompts = 0;
-  const authorization = authorizeApplyPatchRequest(
+  const authorization = authorizeSandboxRequest(
     {
+      source: "test",
       cwd: root,
-      patchText: "parsed patch",
-      mutations: [
-        { operation: "add", path: "allowed.txt" },
-        { operation: "update", path: "source.txt", movePath: ".env" },
+      accesses: [
+        { kind: "write", path: "allowed.txt" },
+        { kind: "write", path: ".env" },
       ],
     },
     createPolicy({
@@ -79,22 +78,26 @@ test("rejects the complete apply_patch request when any path matches denyWrite",
   assert.equal(prompts, 0);
 });
 
-test("allows paths already covered by allowWrite without prompting", async () => {
+test("allows reads and writes already covered by their allow lists without prompting", async () => {
   const root = canonicalizePath(mkdtempSync(join(tmpdir(), "pi-sandbox-allowed-patch-")));
   let prompts = 0;
 
-  await authorizeApplyPatchRequest(
+  await authorizeSandboxRequest(
     {
+      source: "test",
       cwd: root,
-      patchText: "parsed patch",
-      mutations: [
-        { operation: "add", path: "new.txt" },
-        { operation: "delete", path: "old.txt" },
-        { operation: "update", path: "before.txt", movePath: "after.txt" },
+      accesses: [
+        { kind: "read", path: "old.txt" },
+        { kind: "write", path: "new.txt" },
       ],
     },
     createPolicy({
+      effectiveReadPaths: () => [root],
       effectiveWritePaths: () => [root],
+      promptRead: async (path) => {
+        prompts += 1;
+        return { action: "abort", value: path };
+      },
       promptWrite: async (path) => {
         prompts += 1;
         return { action: "abort", value: path };
@@ -105,18 +108,18 @@ test("allows paths already covered by allowWrite without prompting", async () =>
   assert.equal(prompts, 0);
 });
 
-test("reuses a session-approved write rule for later paths in the same patch", async () => {
+test("reuses a session-approved write rule for later paths in one request", async () => {
   const root = canonicalizePath(mkdtempSync(join(tmpdir(), "pi-sandbox-session-patch-")));
   const sessionWritePaths: string[] = [];
   let prompts = 0;
 
-  await authorizeApplyPatchRequest(
+  await authorizeSandboxRequest(
     {
+      source: "test",
       cwd: root,
-      patchText: "parsed patch",
-      mutations: [
-        { operation: "add", path: "one.txt" },
-        { operation: "add", path: "nested/two.txt" },
+      accesses: [
+        { kind: "write", path: "one.txt" },
+        { kind: "write", path: "nested/two.txt" },
       ],
     },
     createPolicy({
@@ -125,7 +128,7 @@ test("reuses a session-approved write rule for later paths in the same patch", a
         prompts += 1;
         return { action: "session", value: root };
       },
-      applyWriteChoice: async (_choice, value) => {
+      applyChoice: async (_choice, _kind, value) => {
         sessionWritePaths.push(value);
       },
     }),
@@ -135,19 +138,19 @@ test("reuses a session-approved write rule for later paths in the same patch", a
   assert.deepEqual(sessionWritePaths, [root]);
 });
 
-test("blocks patches when the enabled sandbox is unavailable", async () => {
+test("blocks requests when the enabled sandbox is unavailable", async () => {
   const root = canonicalizePath(mkdtempSync(join(tmpdir(), "pi-sandbox-unavailable-patch-")));
 
   await assert.rejects(
-    authorizeApplyPatchRequest(
+    authorizeSandboxRequest(
       {
+        source: "test",
         cwd: root,
-        patchText: "parsed patch",
-        mutations: [{ operation: "add", path: "new.txt" }],
+        accesses: [{ kind: "write", path: "new.txt" }],
       },
       createPolicy({ sandboxInitialized: false }),
     ),
-    /Sandbox is unavailable; patch blocked/,
+    /Sandbox is unavailable; operation blocked/,
   );
 });
 
@@ -156,15 +159,15 @@ test("treats an aborted write prompt as an authorization rejection", async () =>
   let appliedChoices = 0;
 
   await assert.rejects(
-    authorizeApplyPatchRequest(
+    authorizeSandboxRequest(
       {
+        source: "test",
         cwd: root,
-        patchText: "parsed patch",
-        mutations: [{ operation: "add", path: "new.txt" }],
+        accesses: [{ kind: "write", path: "new.txt" }],
       },
       createPolicy({
         promptWrite: async (path) => ({ action: "abort", value: path }),
-        applyWriteChoice: async () => {
+        applyChoice: async () => {
           appliedChoices += 1;
         },
       }),
@@ -174,23 +177,26 @@ test("treats an aborted write prompt as an authorization rejection", async () =>
   assert.equal(appliedChoices, 0);
 });
 
-test("does not enforce apply_patch policy while the sandbox is disabled", async () => {
+test("blocks requests while the sandbox is disabled", async () => {
   const root = canonicalizePath(mkdtempSync(join(tmpdir(), "pi-sandbox-disabled-patch-")));
   let prompts = 0;
 
-  await authorizeApplyPatchRequest(
-    {
-      cwd: root,
-      patchText: "parsed patch",
-      mutations: [{ operation: "add", path: ".env" }],
-    },
-    createPolicy({
-      sandboxEnabled: false,
-      promptWrite: async (path) => {
-        prompts += 1;
-        return { action: "abort", value: path };
+  await assert.rejects(
+    authorizeSandboxRequest(
+      {
+        source: "test",
+        cwd: root,
+        accesses: [{ kind: "write", path: ".env" }],
       },
-    }),
+      createPolicy({
+        sandboxEnabled: false,
+        promptWrite: async (path) => {
+          prompts += 1;
+          return { action: "abort", value: path };
+        },
+      }),
+    ),
+    /Sandbox is inactive; operation blocked/,
   );
 
   assert.equal(prompts, 0);

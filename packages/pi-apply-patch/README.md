@@ -39,66 +39,35 @@ Pi exposes this as a freeform grammar tool. Models with `compat.supportsOpenAIGr
 
 Custom provider names are supported when the model id starts with `gpt-` and its Pi API is `openai-responses` or `openai-codex-responses`. For example, a model registered as `my-proxy/gpt-5` with `api: "openai-responses"` activates `apply_patch` without adding the provider name to a hard-coded allowlist.
 
-## Authorization hook
+## Authorization
 
-The registered tool emits `APPLY_PATCH_AUTHORIZATION_EVENT` after it parses and
-validates the complete patch. Authorization listeners must call `waitUntil(...)`
-synchronously during event dispatch, passing a callback. The tool runs each
-callback inside a promise and awaits all results; any synchronous throw or
-rejection blocks the whole patch before preview reads or mutations begin.
-
-```ts
-import { APPLY_PATCH_AUTHORIZATION_EVENT, isApplyPatchAuthorizationEvent } from "pi-apply-patch";
-
-pi.events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
-	if (!isApplyPatchAuthorizationEvent(data)) return;
-	data.waitUntil(() => authorize(data));
-});
-```
-
-Pi's event bus does not await event handlers. Calling `waitUntil` after an
-`await`, timer, or other asynchronous boundary is too late and is rejected.
-With no listeners, the extension keeps its standalone behavior.
-
-Consumers embedding the tool can authorize its complete parser-derived mutation plan before any patch preview reads or filesystem mutations occur:
-
-```ts
-import { registerApplyPatchExtension } from "pi-apply-patch";
-
-registerApplyPatchExtension(pi, {
-	authorize: async ({ cwd, patchText, mutations }) => {
-		// Resolve and authorize every mutation. Updates with a move include movePath.
-	},
-});
-```
-
-`createApplyPatchTool(options)` accepts the same options. The callback receives the current `cwd`, the patch input, and ordered `add`, `delete`, and `update` mutations using raw parser paths. Throwing or rejecting blocks the entire tool call. Calls without options retain the standalone behavior.
+After parsing and validating a complete patch, the tool requests write access
+for every source and destination path through the generic
+[`pi-sandbox` authorization API](../pi-sandbox/README.md#authorization-api).
+Authorization finishes before preview reads or filesystem mutations begin.
+The complete patch is blocked if `pi-sandbox` is missing, inactive, or rejects
+any path.
 
 Use `getApplyPatchMutations(patchText)` when only parser-validated mutation extraction is needed. It applies the same syntax and non-empty-patch validation as tool execution.
 
 ## Installation
 
-The package targets the [`pi`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) coding agent. Install it from the repository checkout:
+The package targets the [`pi`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) coding agent. Install it with `pi-sandbox` from the repository checkout:
 
 ```bash
 pnpm install
 pi install "$(pwd)/packages/pi-apply-patch"
+pi install "$(pwd)/packages/pi-sandbox"
 ```
 
 After installation, restart pi or run `/reload` inside an interactive session.
 
-To enforce `pi-sandbox` policy for patches, install and enable both Pi packages:
-
-```bash
-pi install /path/to/tools/packages/pi-apply-patch
-pi install /path/to/tools/packages/pi-sandbox
-```
-
 An npm dependency is not loaded as a Pi extension, so installing only
 `pi-sandbox` does not register `apply_patch`. `pi-apply-patch` is the sole owner
-of that registration. The tool reads and writes files directly in the Pi
-process, outside the subprocess OS sandbox; authorization listeners such as
-`pi-sandbox` provide the path approval policy.
+of that registration. Installing only `pi-apply-patch` leaves no active
+authorization handler, so every patch is rejected. The tool reads and writes
+files directly in the Pi process, outside the subprocess OS sandbox;
+`pi-sandbox` provides the path approval policy.
 
 ## Development
 

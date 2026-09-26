@@ -1,15 +1,17 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createEventBus, type EventBus } from "@earendil-works/pi-coding-agent";
+import {
+	SANDBOX_AUTHORIZATION_EVENT,
+	type SandboxAuthorizationEvent,
+	type SandboxAuthorizationRequest,
+	isSandboxAuthorizationEvent,
+} from "pi-sandbox/api";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-	APPLY_PATCH_AUTHORIZATION_EVENT,
-	type ApplyPatchAuthorizationEvent,
-	type ApplyPatchAuthorizationRequest,
 	type ApplyPatchExtensionAPI,
 	createApplyPatchTool,
 	getApplyPatchMutations,
-	isApplyPatchAuthorizationEvent,
 	PatchParseError,
 	registerApplyPatchExtension,
 } from "../src/index.js";
@@ -25,9 +27,14 @@ async function createTempDirectory(): Promise<string> {
 async function executePatch(
 	directory: string,
 	patchText: string,
-	authorize?: (request: ApplyPatchAuthorizationRequest) => Promise<void> | void,
+	authorize: (request: SandboxAuthorizationRequest) => Promise<void> | void = () => {},
 ): Promise<void> {
-	const tool = createApplyPatchTool(authorize ? { authorize } : {});
+	const events = createEventBus();
+	events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
+		const event = requireAuthorizationEvent(data);
+		event.waitUntil(() => authorize({ source: event.source, cwd: event.cwd, accesses: event.accesses }));
+	});
+	const tool = createApplyPatchTool({ authorizationEvents: events });
 	await tool.execute("authorization-test", { input: patchText }, undefined, undefined, { cwd: directory } as never);
 }
 
@@ -52,9 +59,9 @@ function createRegisteredTool(events: EventBus): ReturnType<typeof createApplyPa
 	return registeredTool;
 }
 
-function requireAuthorizationEvent(data: unknown): ApplyPatchAuthorizationEvent {
-	if (!isApplyPatchAuthorizationEvent(data)) {
-		throw new Error("invalid apply_patch authorization event");
+function requireAuthorizationEvent(data: unknown): SandboxAuthorizationEvent {
+	if (!isSandboxAuthorizationEvent(data)) {
+		throw new Error("invalid sandbox authorization event");
 	}
 	return data;
 }
@@ -73,7 +80,7 @@ afterEach(async () => {
 });
 
 describe("apply_patch authorization", () => {
-	it("#given no authorization options #when tool executes #then applies the patch", async () => {
+	it("#given no sandbox authorization events #when tool executes #then blocks the patch", async () => {
 		// given
 		const directory = await createTempDirectory();
 		await writeFile(path.join(directory, "sample.txt"), "before\n", "utf-8");
@@ -85,13 +92,17 @@ describe("apply_patch authorization", () => {
 *** End Patch`;
 
 		// when
-		await executePatch(directory, patch);
+		await expect(
+			createApplyPatchTool().execute("missing-sandbox-test", { input: patch }, undefined, undefined, {
+				cwd: directory,
+			} as never),
+		).rejects.toThrow("pi-sandbox is missing or inactive; operation blocked");
 
 		// then
-		expect(await readFile(path.join(directory, "sample.txt"), "utf-8")).toBe("after\n");
+		expect(await readFile(path.join(directory, "sample.txt"), "utf-8")).toBe("before\n");
 	});
 
-	it("#given a registered tool with no authorization listeners #when tool executes #then applies the patch", async () => {
+	it("#given a registered tool with no sandbox listener #when tool executes #then blocks the patch", async () => {
 		// given
 		const directory = await createTempDirectory();
 		const events = createEventBus();
@@ -102,10 +113,12 @@ describe("apply_patch authorization", () => {
 *** End Patch`;
 
 		// when
-		await executeRegisteredPatch(tool, directory, patch);
+		await expect(executeRegisteredPatch(tool, directory, patch)).rejects.toThrow(
+			"pi-sandbox is missing or inactive; operation blocked",
+		);
 
 		// then
-		expect(await readFile(path.join(directory, "standalone.txt"), "utf-8")).toBe("content\n");
+		await expect(readFile(path.join(directory, "standalone.txt"), "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
 	});
 
 	it("#given event authorizers #when one rejects #then all settle and the complete patch is blocked", async () => {
@@ -114,7 +127,7 @@ describe("apply_patch authorization", () => {
 		const events = createEventBus();
 		const tool = createRegisteredTool(events);
 		let slowAuthorizerFinished = false;
-		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+		events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
 			const event = requireAuthorizationEvent(data);
 			event.waitUntil(
 				() =>
@@ -126,7 +139,7 @@ describe("apply_patch authorization", () => {
 					}),
 			);
 		});
-		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+		events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
 			const event = requireAuthorizationEvent(data);
 			event.waitUntil(() => Promise.reject(new Error("event denied")));
 		});
@@ -154,7 +167,7 @@ describe("apply_patch authorization", () => {
 		const authorize = () => {
 			throw new Error("synchronous event denial");
 		};
-		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+		events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
 			const event = requireAuthorizationEvent(data);
 			event.waitUntil(() => authorize());
 		});
@@ -190,7 +203,7 @@ describe("apply_patch authorization", () => {
 		const events = createEventBus();
 		const tool = createRegisteredTool(events);
 		const completed: string[] = [];
-		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+		events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
 			const event = requireAuthorizationEvent(data);
 			event.waitUntil(() => {
 				completed.push("synchronous");
@@ -220,7 +233,7 @@ describe("apply_patch authorization", () => {
 		const tool = createRegisteredTool(events);
 		let requests = 0;
 		let updates = 0;
-		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
+		events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
 			const event = requireAuthorizationEvent(data);
 			requests += 1;
 			event.waitUntil(() => Promise.reject(new Error("event stopped preview")));
@@ -251,7 +264,7 @@ describe("apply_patch authorization", () => {
 		const events = createEventBus();
 		const tool = createRegisteredTool(events);
 		let requests = 0;
-		events.on(APPLY_PATCH_AUTHORIZATION_EVENT, () => {
+		events.on(SANDBOX_AUTHORIZATION_EVENT, () => {
 			requests += 1;
 		});
 
@@ -263,7 +276,7 @@ describe("apply_patch authorization", () => {
 		expect(requests).toBe(0);
 	});
 
-	it("#given all patch operations #when authorized #then callback receives ordered parser-derived mutations once", async () => {
+	it("#given all patch operations #when authorized #then requests every write path once", async () => {
 		// given
 		const directory = await createTempDirectory();
 		await writeFile(path.join(directory, "update.txt"), "before\n", "utf-8");
@@ -283,7 +296,7 @@ describe("apply_patch authorization", () => {
 -move
 +moved
 *** End Patch`;
-		const requests: ApplyPatchAuthorizationRequest[] = [];
+		const requests: SandboxAuthorizationRequest[] = [];
 
 		// when
 		await executePatch(directory, patch, async (request) => {
@@ -294,19 +307,20 @@ describe("apply_patch authorization", () => {
 		// then
 		expect(requests).toEqual([
 			{
+				source: "pi-apply-patch",
 				cwd: directory,
-				patchText: patch,
-				mutations: [
-					{ operation: "add", path: "add.txt" },
-					{ operation: "update", path: "update.txt" },
-					{ operation: "delete", path: "delete.txt" },
-					{ operation: "update", path: "move.txt", movePath: "moved.txt" },
+				accesses: [
+					{ kind: "write", path: "add.txt" },
+					{ kind: "write", path: "update.txt" },
+					{ kind: "write", path: "delete.txt" },
+					{ kind: "write", path: "move.txt" },
+					{ kind: "write", path: "moved.txt" },
 				],
 			},
 		]);
 	});
 
-	it("#given callback mutates its request #when execution continues #then internal parsed hunks are unchanged", async () => {
+	it("#given a listener tries to mutate its request #when authorizing #then the request stays immutable", async () => {
 		// given
 		const directory = await createTempDirectory();
 		const patch = `*** Begin Patch
@@ -316,10 +330,9 @@ describe("apply_patch authorization", () => {
 
 		// when
 		await executePatch(directory, patch, (request) => {
-			const mutation = request.mutations[0];
-			if (mutation) {
-				mutation.path = "redirected.txt";
-			}
+			const access = request.accesses[0];
+			if (!access) throw new Error("missing requested access");
+			expect(Reflect.set(access, "path", "redirected.txt")).toBe(false);
 		});
 
 		// then
@@ -360,11 +373,14 @@ describe("apply_patch authorization", () => {
 *** Delete File: .
 *** End Patch`;
 		let updates = 0;
-		const tool = createApplyPatchTool({
-			authorize() {
+		const events = createEventBus();
+		events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
+			const event = requireAuthorizationEvent(data);
+			event.waitUntil(() => {
 				throw new Error("authorization stopped preview");
-			},
+			});
 		});
+		const tool = createApplyPatchTool({ authorizationEvents: events });
 
 		// when / then
 		await expect(
@@ -414,7 +430,7 @@ describe("apply_patch authorization", () => {
 		expect(() => getApplyPatchMutations(regexLikeInvalidPatch)).toThrow(PatchParseError);
 	});
 
-	it("#given configurable extension registration #when registered #then forwards authorization to the tool", async () => {
+	it("#given extension registration without pi-sandbox #when executed #then blocks the tool", async () => {
 		// given
 		const directory = await createTempDirectory();
 		const patch = `*** Begin Patch
@@ -440,11 +456,7 @@ describe("apply_patch authorization", () => {
 			},
 			setActiveTools() {},
 		} satisfies ApplyPatchExtensionAPI;
-		registerApplyPatchExtension(api, {
-			authorize() {
-				throw new Error("extension denied");
-			},
-		});
+		registerApplyPatchExtension(api);
 
 		// when / then
 		const registeredTool = registeredTools[0];
@@ -455,6 +467,6 @@ describe("apply_patch authorization", () => {
 			registeredTool.execute("registered-authorization-test", { input: patch }, undefined, undefined, {
 				cwd: directory,
 			} as never),
-		).rejects.toThrow("extension denied");
+		).rejects.toThrow("pi-sandbox is missing or inactive; operation blocked");
 	});
 });

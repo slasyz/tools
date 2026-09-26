@@ -234,6 +234,9 @@ importers:
       diff:
         specifier: ^9.0.0
         version: 9.0.0
+      pi-sandbox:
+        specifier: workspace:*
+        version: link:../pi-sandbox
       typebox:
         specifier: '*'
         version: 1.3.27
@@ -259,9 +262,6 @@ importers:
 
   packages/pi-sandbox:
     dependencies:
-      pi-apply-patch:
-        specifier: workspace:*
-        version: link:../pi-apply-patch
       sandbox:
         specifier: workspace:*
         version: link:../sandbox

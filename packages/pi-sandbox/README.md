@@ -1,7 +1,7 @@
 # pi-sandbox
 
 OS-level sandboxing and permission prompts for [Pi](https://pi.dev/) on macOS and Linux.
-`read`, `write`, `edit`, and `pi-apply-patch` tool calls are checked in Pi. Bash and
+`read`, `write`, `edit`, and `apply_patch` tool calls are checked in Pi. Bash and
 `!cmd` use the reusable workspace package [`sandbox`](../sandbox/) and
 [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropics/sandbox-runtime).
 
@@ -78,13 +78,32 @@ user approval. Without a UI for approval, it does not run the command.
 still matches `denyWrite` produces a warning. `denyRead` is not a hard block
 for the direct Pi read tool: a read grant adds the path to `allowRead`.
 
-`pi-apply-patch` is the sole owner of the `apply_patch` tool registration, so
-both packages must be installed and enabled. Pi does not load a dependency as
-a Pi extension. `pi-sandbox` listens for parser-derived authorization requests
-and attaches its authorization promise synchronously with the event's
-`waitUntil(...)` callback. Every source and destination path in a patch is
-checked **before** preview reads or changes start. If any path is denied, the
-entire patch is rejected.
+## Authorization API
+
+Other Pi extensions request filesystem access through the side-effect-free
+`pi-sandbox/api` export:
+
+```ts
+import { requestSandboxAuthorization } from "pi-sandbox/api";
+
+await requestSandboxAuthorization(pi.events, {
+  source: "pi-multi-edit",
+  cwd: ctx.cwd,
+  accesses: [
+    { kind: "read", path: "src/input.ts" },
+    { kind: "write", path: "src/output.ts" },
+  ],
+});
+```
+
+Requesters must submit every planned access after validating their input and
+before reading or changing files. A write grant also covers reads needed to
+modify that path. The request waits for the sandbox policy decision. It rejects
+if `pi-sandbox` is missing, disabled, not initialized, or denies any access.
+
+`pi-apply-patch` uses this API for every source and destination path. It owns
+the `apply_patch` tool registration, so both packages must be installed and
+enabled. Pi does not load a dependency as a Pi extension.
 
 The `apply_patch` tool reads and writes files in the Pi process. These direct
 writes are not contained by the subprocess OS sandbox; the checks above are

@@ -12,6 +12,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import * as Diff from "diff";
+import {
+	requestSandboxAuthorization,
+	type SandboxAuthorizationEvents,
+	type SandboxAuthorizationRequest,
+} from "pi-sandbox/api";
 import { Type } from "typebox";
 import { writeFileAtomic } from "./write-file-atomic.js";
 
@@ -48,47 +53,12 @@ export type ApplyPatchMutation =
 	| { operation: "delete"; path: string }
 	| { operation: "update"; path: string; movePath?: string };
 
-export type ApplyPatchAuthorizationRequest = {
-	cwd: string;
-	patchText: string;
-	mutations: ApplyPatchMutation[];
-};
-
-export const APPLY_PATCH_AUTHORIZATION_EVENT = "pi-apply-patch:authorize";
-
-export type ApplyPatchAuthorizationEvent = ApplyPatchAuthorizationRequest & {
-	waitUntil: (authorize: () => PromiseLike<void> | void) => void;
-};
-
-export function isApplyPatchAuthorizationEvent(data: unknown): data is ApplyPatchAuthorizationEvent {
-	return Boolean(
-		data &&
-		typeof data === "object" &&
-		"cwd" in data &&
-		typeof data.cwd === "string" &&
-		"patchText" in data &&
-		typeof data.patchText === "string" &&
-		"mutations" in data &&
-		Array.isArray(data.mutations) &&
-		"waitUntil" in data &&
-		typeof data.waitUntil === "function",
-	);
-}
-
-export type ApplyPatchAuthorize = (request: ApplyPatchAuthorizationRequest) => Promise<void> | void;
-
 export type ApplyPatchToolOptions = {
-	authorize?: ApplyPatchAuthorize;
+	authorizationEvents?: SandboxAuthorizationEvents;
 };
 
 export type ApplyPatchExtensionAPI = Pick<ExtensionAPI, "events" | "on" | "getActiveTools" | "setActiveTools"> & {
 	registerTool: (tool: ApplyPatchToolDefinition) => void;
-};
-
-type ApplyPatchAuthorizationEvents = Pick<ExtensionAPI["events"], "emit">;
-
-type CreateApplyPatchToolOptions = ApplyPatchToolOptions & {
-	authorizationEvents?: ApplyPatchAuthorizationEvents;
 };
 
 type ApplyPatchParams = {
@@ -1139,60 +1109,20 @@ export function getApplyPatchMutations(patchText: string): ApplyPatchMutation[] 
 	return getParsedPatchMutations(parseNonEmptyPatch(patchText));
 }
 
-function createAuthorizationRequest(
-	cwd: string,
-	patchText: string,
-	hunks: ParsedPatch[],
-): ApplyPatchAuthorizationRequest {
-	return { cwd, patchText, mutations: getParsedPatchMutations(hunks) };
+function createSandboxAuthorizationRequest(cwd: string, hunks: ParsedPatch[]): SandboxAuthorizationRequest {
+	const accesses = getParsedPatchMutations(hunks).flatMap((mutation) => {
+		const paths =
+			mutation.operation === "update" && mutation.movePath ? [mutation.path, mutation.movePath] : [mutation.path];
+		return paths.map((path) => ({ kind: "write" as const, path }));
+	});
+	return { source: "pi-apply-patch", cwd, accesses };
 }
 
-async function authorizeParsedPatch(
-	cwd: string,
-	patchText: string,
-	hunks: ParsedPatch[],
-	options: CreateApplyPatchToolOptions,
-): Promise<void> {
-	const authorizations: Promise<void>[] = [];
-	if (options.authorize) {
-		try {
-			authorizations.push(Promise.resolve(options.authorize(createAuthorizationRequest(cwd, patchText, hunks))));
-		} catch (error) {
-			authorizations.push(Promise.reject(error));
-		}
+async function authorizeParsedPatch(cwd: string, hunks: ParsedPatch[], options: ApplyPatchToolOptions): Promise<void> {
+	if (!options.authorizationEvents) {
+		throw new Error("pi-sandbox is missing or inactive; operation blocked");
 	}
-
-	if (options.authorizationEvents) {
-		let acceptingAuthorizations = true;
-		const request = createAuthorizationRequest(cwd, patchText, hunks);
-		for (const mutation of request.mutations) {
-			Object.freeze(mutation);
-		}
-		Object.freeze(request.mutations);
-		const event: ApplyPatchAuthorizationEvent = Object.freeze({
-			...request,
-			waitUntil(authorize: () => PromiseLike<void> | void): void {
-				if (!acceptingAuthorizations) {
-					throw new Error("apply_patch authorization must be attached synchronously");
-				}
-				authorizations.push(Promise.resolve().then(() => authorize()));
-			},
-		});
-
-		try {
-			options.authorizationEvents.emit(APPLY_PATCH_AUTHORIZATION_EVENT, event);
-		} catch (error) {
-			authorizations.push(Promise.reject(error));
-		} finally {
-			acceptingAuthorizations = false;
-		}
-	}
-
-	const results = await Promise.allSettled(authorizations);
-	const rejection = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-	if (rejection) {
-		throw rejection.reason;
-	}
+	await requestSandboxAuthorization(options.authorizationEvents, createSandboxAuthorizationRequest(cwd, hunks));
 }
 
 function splitFileLines(content: string): string[] {
@@ -1503,7 +1433,7 @@ function syncToolset(
 	pi.setActiveTools(replaceApplyPatchWithEditTools(currentToolNames));
 }
 
-export function createApplyPatchTool(options: CreateApplyPatchToolOptions = {}): ApplyPatchToolDefinition {
+export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): ApplyPatchToolDefinition {
 	const tool = defineTool({
 		name: "apply_patch",
 		label: "ApplyPatch",
@@ -1528,7 +1458,7 @@ export function createApplyPatchTool(options: CreateApplyPatchToolOptions = {}):
 			}
 
 			const parsedHunks = parseNonEmptyPatch(normalizedParams.input);
-			await authorizeParsedPatch(ctx.cwd, normalizedParams.input, parsedHunks, options);
+			await authorizeParsedPatch(ctx.cwd, parsedHunks, options);
 
 			const initialProgress = { applied: 0, failed: 0, total: parsedHunks.length };
 			const pendingUpdate = await createPendingPatchUpdate(
@@ -1649,8 +1579,8 @@ export function createApplyPatchTool(options: CreateApplyPatchToolOptions = {}):
 	});
 }
 
-export function registerApplyPatchExtension(pi: ApplyPatchExtensionAPI, options: ApplyPatchToolOptions = {}): void {
-	pi.registerTool(createApplyPatchTool({ ...options, authorizationEvents: pi.events }));
+export function registerApplyPatchExtension(pi: ApplyPatchExtensionAPI): void {
+	pi.registerTool(createApplyPatchTool({ authorizationEvents: pi.events }));
 
 	pi.on("session_start", async (_event, ctx) => {
 		syncToolset(pi, ctx.model);

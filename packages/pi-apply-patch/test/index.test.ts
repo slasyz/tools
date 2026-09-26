@@ -1,5 +1,7 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
+import { SANDBOX_AUTHORIZATION_EVENT, isSandboxAuthorizationEvent } from "pi-sandbox/api";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	APPLY_PATCH_FREEFORM_DESCRIPTION,
@@ -37,6 +39,17 @@ type ToolsetHandler = (
 	event: { model?: ToolsetModel },
 	ctx: { model: ToolsetModel | undefined },
 ) => void | Promise<void>;
+
+function createAuthorizedApplyPatchTool(): ReturnType<typeof createApplyPatchTool> {
+	const events = createEventBus();
+	events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
+		if (!isSandboxAuthorizationEvent(data)) {
+			throw new Error("invalid sandbox authorization event");
+		}
+		data.waitUntil(() => {});
+	});
+	return createApplyPatchTool({ authorizationEvents: events });
+}
 
 function isToolsetHandler(value: unknown): value is ToolsetHandler {
 	return typeof value === "function";
@@ -294,7 +307,7 @@ describe("pi-apply-patch", () => {
 *** Add File: created.txt
 +created
 *** End Patch`;
-		const tool = createApplyPatchTool();
+		const tool = createAuthorizedApplyPatchTool();
 		const updates: Array<{ text: string; update: ApplyPatchUpdate }> = [];
 
 		// when
@@ -349,7 +362,7 @@ describe("pi-apply-patch", () => {
 -before
 +after
 *** End Patch`;
-		const tool = createApplyPatchTool();
+		const tool = createAuthorizedApplyPatchTool();
 
 		// when
 		const result = await tool.execute("apply-patch-final-preview-test", { input: patch }, undefined, undefined, {
@@ -388,7 +401,7 @@ describe("pi-apply-patch", () => {
 		const updates: string[] = [];
 
 		// when
-		await createApplyPatchTool().execute(
+		await createAuthorizedApplyPatchTool().execute(
 			"apply-patch-cwd-preview-test",
 			{ input: patch },
 			undefined,
@@ -421,7 +434,7 @@ describe("pi-apply-patch", () => {
 		const updates: string[] = [];
 
 		// when
-		await createApplyPatchTool().execute(
+		await createAuthorizedApplyPatchTool().execute(
 			"apply-patch-large-preview-test",
 			{ input: patch },
 			undefined,
@@ -475,7 +488,7 @@ describe("pi-apply-patch", () => {
 -two
 +TWO
 *** End Patch`;
-		const tool = createApplyPatchTool();
+		const tool = createAuthorizedApplyPatchTool();
 		const updates: ApplyPatchUpdate[] = [];
 
 		// when
@@ -539,7 +552,7 @@ describe("pi-apply-patch", () => {
 		const updates: string[] = [];
 
 		// when
-		await createApplyPatchTool().execute(
+		await createAuthorizedApplyPatchTool().execute(
 			"apply-patch-overwrite-test",
 			{ input: patch },
 			undefined,
@@ -898,9 +911,15 @@ EOF`;
 *** End Patch`;
 
 		// when
-		const result = await createApplyPatchTool().execute("apply-patch-test", { input: patch }, undefined, undefined, {
-			cwd: directory,
-		} as never);
+		const result = await createAuthorizedApplyPatchTool().execute(
+			"apply-patch-test",
+			{ input: patch },
+			undefined,
+			undefined,
+			{
+				cwd: directory,
+			} as never,
+		);
 
 		// then
 		const text = result.content.find((block) => block.type === "text")?.text ?? "";
@@ -926,9 +945,15 @@ EOF`;
 *** End Patch`;
 
 		// when
-		const result = await createApplyPatchTool().execute("apply-patch-test", { input: patch }, undefined, undefined, {
-			cwd: directory,
-		} as never);
+		const result = await createAuthorizedApplyPatchTool().execute(
+			"apply-patch-test",
+			{ input: patch },
+			undefined,
+			undefined,
+			{
+				cwd: directory,
+			} as never,
+		);
 
 		// then
 		const text = result.content.find((block) => block.type === "text")?.text ?? "";
@@ -948,9 +973,15 @@ EOF`;
 *** End Patch`;
 
 		// when
-		const result = await createApplyPatchTool().execute("apply-patch-test", { input: patch }, undefined, undefined, {
-			cwd: directory,
-		} as never);
+		const result = await createAuthorizedApplyPatchTool().execute(
+			"apply-patch-test",
+			{ input: patch },
+			undefined,
+			undefined,
+			{
+				cwd: directory,
+			} as never,
+		);
 
 		// then
 		const text = result.content.find((block) => block.type === "text")?.text ?? "";
@@ -971,9 +1002,15 @@ EOF`;
 *** End Patch`;
 
 		// when
-		const result = await createApplyPatchTool().execute("apply-patch-test", { input: patch }, undefined, undefined, {
-			cwd: directory,
-		} as never);
+		const result = await createAuthorizedApplyPatchTool().execute(
+			"apply-patch-test",
+			{ input: patch },
+			undefined,
+			undefined,
+			{
+				cwd: directory,
+			} as never,
+		);
 
 		// then
 		const text = result.content.find((block) => block.type === "text")?.text ?? "";

@@ -5,14 +5,14 @@
   "type": "module",
   "main": "./index.ts",
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./api": "./src/api.ts"
   },
   "scripts": {
     "check": "tsc --noEmit",
     "test": "vitest --run"
   },
   "dependencies": {
-    "pi-apply-patch": "workspace:*",
     "sandbox": "workspace:*"
   },
   "devDependencies": {

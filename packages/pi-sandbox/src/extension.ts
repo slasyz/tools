@@ -7,11 +7,6 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
-  APPLY_PATCH_AUTHORIZATION_EVENT,
-  type ApplyPatchAuthorizationRequest,
-  isApplyPatchAuthorizationEvent,
-} from "pi-apply-patch";
-import {
   addDomainToConfig,
   addReadPathToConfig,
   addWritePathToConfig,
@@ -31,9 +26,14 @@ import {
   supportsNodeEnvProxy,
 } from "sandbox";
 
+import {
+  SANDBOX_AUTHORIZATION_EVENT,
+  type SandboxAuthorizationRequest,
+  isSandboxAuthorizationEvent,
+} from "./api.ts";
 import registerUnsandboxedBash from "./bash-unsandboxed.ts";
 import { createSandboxedBashOps } from "./bash.ts";
-import { authorizeApplyPatchRequest } from "./policy.ts";
+import { authorizeSandboxRequest } from "./policy.ts";
 import {
   formatSandboxConfiguration,
   type PermissionPromptResult,
@@ -126,28 +126,35 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function authorizeApplyPatch(request: ApplyPatchAuthorizationRequest): Promise<void> {
+  async function authorizeRequest(request: SandboxAuthorizationRequest): Promise<void> {
     const config = loadConfig();
-    await authorizeApplyPatchRequest(request, {
+    await authorizeSandboxRequest(request, {
       sandboxEnabled,
       sandboxInitialized,
       config,
       configPath: getConfigPath(),
       sessionContextAvailable: sessionContext !== undefined,
+      effectiveReadPaths,
       effectiveWritePaths,
+      promptRead: async (path) => {
+        if (!sessionContext) {
+          return { action: "abort", value: path };
+        }
+        return promptReadBlock(pi, sessionContext, path);
+      },
       promptWrite: async (path) => {
         if (!sessionContext) {
           return { action: "abort", value: path };
         }
         return promptWriteBlock(pi, sessionContext, path);
       },
-      applyWriteChoice: (choice, value) => applyChoice(choice, "write", value),
+      applyChoice: (choice, kind, value) => applyChoice(choice, kind, value),
     });
   }
 
-  pi.events.on(APPLY_PATCH_AUTHORIZATION_EVENT, (data) => {
-    if (!isApplyPatchAuthorizationEvent(data)) return;
-    data.waitUntil(() => authorizeApplyPatch(data));
+  pi.events.on(SANDBOX_AUTHORIZATION_EVENT, (data) => {
+    if (!isSandboxAuthorizationEvent(data)) return;
+    data.waitUntil(() => authorizeRequest(data));
   });
   registerUnsandboxedBash(pi);
 

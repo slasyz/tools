@@ -31,7 +31,8 @@
 		"check": "tsgo --noEmit && oxlint src test && oxfmt --check ."
 	},
 	"dependencies": {
-		"diff": "^9.0.0"
+		"diff": "^9.0.0",
+		"pi-sandbox": "workspace:*"
 	},
 	"devDependencies": {
 		"@types/node": "^26.1.1",
