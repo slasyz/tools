@@ -16,14 +16,18 @@ import { Box, Container, SelectList, Spacer, Text, type SelectItem } from "@eare
 
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
 
-async function requestApproval(ctx: ExtensionContext, command: string): Promise<boolean> {
+type ApprovalResult = "approved" | "rejected" | "cancelled";
+
+async function requestApproval(ctx: ExtensionContext, command: string): Promise<ApprovalResult> {
   if (ctx.mode !== "tui") {
     const choice = await ctx.ui.select(
       `Run command outside the sandbox?\nWorking directory: ${ctx.cwd}\n\n${command}`,
       ["Approve", "Reject"],
       { signal: ctx.signal, timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS },
     );
-    return choice === "Approve";
+    if (choice === "Approve") return "approved";
+    if (choice === "Reject") return "rejected";
+    return "cancelled";
   }
 
   const choice = await ctx.ui.custom<"cancel" | "run">((tui, theme, _keybindings, done) => {
@@ -76,7 +80,9 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
     };
   });
 
-  return choice === "run";
+  if (choice === "run") return "approved";
+  if (choice === "cancel") return "rejected";
+  return "cancelled";
 }
 
 export default function (pi: ExtensionAPI) {
@@ -114,11 +120,17 @@ export default function (pi: ExtensionAPI) {
         toolName: "bash_unsandboxed",
       });
 
-      const approved = await requestApproval(ctx, params.command);
+      const approval = await requestApproval(ctx, params.command);
 
-      if (!approved) {
+      if (approval !== "approved") {
+        const text =
+          approval === "rejected"
+            ? "Command not run: user denied permission."
+            : ctx.mode === "rpc"
+              ? "Command not run: approval was cancelled or timed out. RPC clients must handle extension_ui_request and reply with extension_ui_response."
+              : "Command not run: no approval was received because the permission request was cancelled.";
         return {
-          content: [{ type: "text", text: "Command not run: user denied permission." }],
+          content: [{ type: "text", text }],
           details: undefined,
         };
       }
