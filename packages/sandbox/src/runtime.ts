@@ -41,7 +41,7 @@ export function resolveAllowances(
 }
 
 export function createNetworkAskCallback(allowedDomains: string[]): SandboxAskCallback {
-  return async ({ host }) => domainIsAllowed(host, allowedDomains);
+  return async ({ host, port }) => domainIsAllowed(host, allowedDomains, port);
 }
 
 export function buildRuntimeConfig(

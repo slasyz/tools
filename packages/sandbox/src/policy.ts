@@ -6,17 +6,38 @@ export function shouldPromptForWrite(path: string, allowWrite: string[]): boolea
   return allowWrite.length === 0 || !matchesPattern(path, allowWrite);
 }
 
-export function extractDomainsFromCommand(command: string): string[] {
-  const urlRegex = /https?:\/\/([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
-  const domains = new Set<string>();
-  let match: RegExpExecArray | null;
-  while ((match = urlRegex.exec(command)) !== null) domains.add(match[1]);
-  return [...domains];
+export interface NetworkDestination {
+  host: string;
+  port: number;
 }
 
-export function domainMatchesPattern(domain: string, pattern: string): boolean {
-  const host = domain.toLowerCase();
-  const rule = pattern.toLowerCase();
+export function extractDomainsFromCommand(command: string): NetworkDestination[] {
+  const urlRegex =
+    /\b(https?):\/\/([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?::([0-9]{1,5}))?(?=[/?#\s"'`;)(|&<>]|$)/gi;
+  const domains = new Map<string, NetworkDestination>();
+  let match: RegExpExecArray | null;
+  while ((match = urlRegex.exec(command)) !== null) {
+    const host = match[2].toLowerCase();
+    const port =
+      match[3] === undefined ? (match[1].toLowerCase() === "https" ? 443 : 80) : Number(match[3]);
+    if (port < 1 || port > 65535) continue;
+    domains.set(`${host}:${port}`, { host, port });
+  }
+  return [...domains.values()];
+}
+
+function splitPort(value: string): { host: string; port?: number } {
+  const match = /^([^:]+):([1-9][0-9]{0,4})$/.exec(value);
+  if (!match || Number(match[2]) > 65535) return { host: value };
+  return { host: match[1], port: Number(match[2]) };
+}
+
+export function domainMatchesPattern(domain: string, pattern: string, port?: number): boolean {
+  const target = port === undefined ? splitPort(domain) : { host: domain, port };
+  const ruleTarget = splitPort(pattern);
+  if (ruleTarget.port !== undefined && ruleTarget.port !== target.port) return false;
+  const host = target.host.toLowerCase();
+  const rule = ruleTarget.host.toLowerCase();
   if (rule.startsWith("*.")) {
     const base = rule.slice(2);
     return base.includes(".") && host.endsWith("." + base);
@@ -24,8 +45,8 @@ export function domainMatchesPattern(domain: string, pattern: string): boolean {
   return rule !== "*" && host === rule;
 }
 
-export function domainIsAllowed(domain: string, allowedDomains: string[]): boolean {
-  return allowedDomains.some((pattern) => domainMatchesPattern(domain, pattern));
+export function domainIsAllowed(domain: string, allowedDomains: string[], port?: number): boolean {
+  return allowedDomains.some((pattern) => domainMatchesPattern(domain, pattern, port));
 }
 
 function expandPath(filePath: string): string {

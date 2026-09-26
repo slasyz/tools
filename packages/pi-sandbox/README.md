@@ -50,7 +50,10 @@ See [`sandbox.json`](./sandbox.json) for a small sample.
 ```
 
 `*.example.com` permits subdomains, **not** `example.com`; list the base
-domain separately. Upstream rejects `"*"` in `allowedDomains`. Browser process
+domain separately. Use `example.com:443` or `*.example.com:8443` to permit only
+that port; a rule without `:port` permits any port. Literal HTTP(S) URLs in bash
+commands are checked using their destination port (80 or 443 by default).
+Upstream rejects `"*"` in `allowedDomains`. Browser process
 exceptions and unauthenticated SOCKS proxy options from the old fork are not
 supported. Network restrictions apply to sandboxed subprocesses, not Pi's own
 network requests.

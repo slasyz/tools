@@ -240,12 +240,12 @@ export default function (pi: ExtensionAPI) {
       };
     }
     for (const domain of extractDomainsFromCommand(event.command)) {
-      if (!domainIsAllowed(domain, effectiveDomains())) {
+      if (!domainIsAllowed(domain.host, effectiveDomains(), domain.port)) {
         const choice = await promptDomainBlock(pi, ctx, domain);
         if (choice.action === "abort") {
           return {
             result: {
-              output: `Blocked: "${domain}" is not in allowedDomains. Use /sandbox to review your config.`,
+              output: `Blocked: "${domain.host}:${domain.port}" is not in allowedDomains. Use /sandbox to review your config.`,
               exitCode: 1,
               cancelled: false,
               truncated: false,
@@ -266,12 +266,12 @@ export default function (pi: ExtensionAPI) {
 
     if (isToolCallEventType("bash", event)) {
       for (const domain of extractDomainsFromCommand(event.input.command)) {
-        if (!domainIsAllowed(domain, effectiveDomains())) {
+        if (!domainIsAllowed(domain.host, effectiveDomains(), domain.port)) {
           const choice = await promptDomainBlock(pi, ctx, domain);
           if (choice.action === "abort") {
             return {
               block: true,
-              reason: `Network access to "${domain}" is blocked (not in allowedDomains).`,
+              reason: `Network access to "${domain.host}:${domain.port}" is blocked (not in allowedDomains).`,
             };
           }
           await applyChoice(choice.action, "domain", choice.value);

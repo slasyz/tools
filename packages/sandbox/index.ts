@@ -13,6 +13,7 @@ export {
   extractDomainsFromCommand,
   domainMatchesPattern,
   domainIsAllowed,
+  type NetworkDestination,
   canonicalizePath,
   matchesPattern,
 } from "./src/policy.ts";

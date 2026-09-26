@@ -3,6 +3,7 @@ import { Input, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil
 import {
   domainIsAllowed,
   matchesPattern,
+  type NetworkDestination,
   type SandboxConfig,
   type SessionAllowances,
 } from "sandbox";
@@ -306,14 +307,16 @@ const validRule = (value: string, matches: boolean, target: string): string | nu
 export function promptDomainBlock(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  domain: string,
+  domain: NetworkDestination,
 ): Promise<PermissionPromptResult> {
+  const target = `${domain.host}:${domain.port}`;
   return showPermissionPrompt(
     pi,
     ctx,
-    `🌐 Network blocked: "${domain}" is not in allowedDomains`,
-    domain,
-    (value) => validRule(value, domainIsAllowed(domain, [value]), `domain "${domain}"`),
+    `🌐 Network blocked: "${target}" is not in allowedDomains`,
+    target,
+    (value) =>
+      validRule(value, domainIsAllowed(domain.host, [value], domain.port), `domain "${target}"`),
   );
 }
 

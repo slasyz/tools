@@ -5,6 +5,7 @@ import { test } from "vitest";
 import { DEFAULT_CONFIG, mergeConfig } from "../src/config.ts";
 import {
   buildRuntimeConfig,
+  createNetworkAskCallback,
   extractBlockedWritePath,
   initializeSandbox,
   resolveAllowances,
@@ -38,6 +39,14 @@ test("buildRuntimeConfig rejects wildcard allowlists from saved config and sessi
 test("initializeSandbox rejects a legacy wildcard allowlist before runtime initialization", async () => {
   const config = mergeConfig(DEFAULT_CONFIG, { network: { allowedDomains: ["*"] } });
   await assert.rejects(initializeSandbox(config), /Invalid domain pattern/);
+});
+
+test("network callback respects port-scoped grants", async () => {
+  const ask = createNetworkAskCallback(["example.com:443", "*.other.com:8443"]);
+  assert.equal(await ask({ host: "example.com", port: 443 }), true);
+  assert.equal(await ask({ host: "example.com", port: 80 }), false);
+  assert.equal(await ask({ host: "api.other.com", port: 8443 }), true);
+  assert.equal(await ask({ host: "example.com", port: undefined }), false);
 });
 
 test("buildRuntimeConfig strips obsolete properties before passing config to the runtime", () => {

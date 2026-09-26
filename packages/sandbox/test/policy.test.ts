@@ -13,11 +13,33 @@ import {
   shouldPromptForWrite,
 } from "../src/policy.ts";
 
-test("extracts and deduplicates literal HTTP domains", () => {
+test("extracts and deduplicates literal HTTP destinations by host and port", () => {
   assert.deepEqual(
-    extractDomainsFromCommand("curl https://api.example.com/a http://api.example.com/b"),
-    ["api.example.com"],
+    extractDomainsFromCommand(
+      "curl https://api.example.com/a https://api.example.com:443/b http://api.example.com/c http://api.example.com:8080/d",
+    ),
+    [
+      { host: "api.example.com", port: 443 },
+      { host: "api.example.com", port: 80 },
+      { host: "api.example.com", port: 8080 },
+    ],
   );
+  assert.deepEqual(extractDomainsFromCommand("curl https://api.example.com:99999/"), []);
+});
+
+test("extracts HTTP destinations before shell operators", () => {
+  assert.deepEqual(extractDomainsFromCommand("curl https://example.com|cat"), [
+    { host: "example.com", port: 443 },
+  ]);
+  assert.deepEqual(extractDomainsFromCommand("curl https://example.com:8443&&echo done"), [
+    { host: "example.com", port: 8443 },
+  ]);
+  assert.deepEqual(extractDomainsFromCommand("curl http://example.com; echo done"), [
+    { host: "example.com", port: 80 },
+  ]);
+  assert.deepEqual(extractDomainsFromCommand("curl https://example.com>output.txt"), [
+    { host: "example.com", port: 443 },
+  ]);
 });
 
 test("matches exact and subdomain policies but not an all-domain wildcard", () => {
@@ -27,6 +49,20 @@ test("matches exact and subdomain policies but not an all-domain wildcard", () =
   assert.equal(domainIsAllowed("API.GitHub.com", ["*.github.com"]), true);
   assert.equal(domainIsAllowed("notgithub.com", ["*.github.com"]), false);
   assert.equal(domainIsAllowed("github.com", ["*"]), false);
+});
+
+test("port-scoped rules match only the requested port", () => {
+  assert.equal(domainIsAllowed("example.com", ["example.com:443"], 443), true);
+  assert.equal(domainIsAllowed("example.com", ["example.com:443"], 80), false);
+  assert.equal(domainIsAllowed("example.com", ["example.com:443"]), false);
+  assert.equal(domainIsAllowed("example.com:443", ["example.com:443"]), true);
+  assert.equal(domainIsAllowed("example.com:8443", ["example.com:443"]), false);
+  assert.equal(domainIsAllowed("example.com:8443", ["example.com"]), true);
+  assert.equal(domainIsAllowed("api.example.com", ["*.example.com:8443"], 8443), true);
+  assert.equal(domainIsAllowed("api.example.com", ["*.example.com:8443"], 443), false);
+  assert.equal(domainIsAllowed("example.com", ["*.example.com:8443"], 8443), false);
+  assert.equal(domainIsAllowed("EXAMPLE.COM", ["example.com:443"], 443), true);
+  assert.equal(domainIsAllowed("example.com", ["*:443"], 443), false);
 });
 
 test("empty allowWrite prompts securely", () => {
