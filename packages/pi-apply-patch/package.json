@@ -3,9 +3,9 @@
 	"version": "0.1.2",
 	"description": "Codex-style apply_patch tool extension for the pi coding agent. Registers a freeform grammar patch tool for OpenAI GPT models and applies patches with Node path resolution.",
 	"type": "module",
-	"main": "./src/index.ts",
+	"main": "./index.ts",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./index.ts"
 	},
 	"license": "MIT",
 	"homepage": "https://github.com/code-yeongyu/pi-apply-patch",
@@ -30,7 +30,7 @@
 	],
 	"pi": {
 		"extensions": [
-			"./src/index.ts"
+			"./index.ts"
 		]
 	},
 	"scripts": {
