@@ -12,7 +12,7 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "pi-apply-patch": "github:slasyz/pi-apply-patch#main",
+    "pi-apply-patch": "workspace:*",
     "sandbox": "workspace:*"
   },
   "devDependencies": {
