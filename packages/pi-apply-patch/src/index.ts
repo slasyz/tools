@@ -162,11 +162,17 @@ export class PatchApplicationError extends Error {
 }
 
 type ApplyPatchRenderState = {
-	cwd: string;
 	patchText: string;
-	callText: string;
-	collapsed: string;
-	expanded: string;
+	files: ApplyPatchCallFile[];
+};
+
+type ApplyPatchCallFile = {
+	operation: ApplyPatchOperation;
+	filePath: string;
+	movePath?: string;
+	added: number;
+	removed: number;
+	complete: boolean;
 };
 
 type ApplyPatchThemeColor =
@@ -560,6 +566,12 @@ function formatPatchOperation(operation: ApplyPatchOperation): string {
 	return "Edited";
 }
 
+function formatPatchingOperation(operation: ApplyPatchOperation): string {
+	if (operation === "add") return "adding";
+	if (operation === "delete") return "deleting";
+	return "editing";
+}
+
 export function formatPatchPreview(
 	preview: ApplyPatchPreview,
 	cwd: string = process.cwd(),
@@ -596,37 +608,13 @@ export function formatPatchPreview(
 	return lines.join("\n");
 }
 
-function getApplyPatchRenderState(toolCallId: string, cwd: string, patchText: string): ApplyPatchRenderState {
+function getApplyPatchRenderState(toolCallId: string, patchText: string): ApplyPatchRenderState {
 	const existing = applyPatchRenderStates.get(toolCallId);
-	if (existing && existing.cwd === cwd && existing.patchText === patchText) {
+	if (existing && existing.patchText === patchText) {
 		return existing;
 	}
 
-	const callText = formatInFlightCallText(patchText);
-	let collapsed = "";
-	let expanded = "";
-	try {
-		const hunks = parsePatch(patchText);
-		if (hunks.length > 0) {
-			const files = hunks.map((hunk) => {
-				const file = {
-					filePath: hunk.filePath,
-					operation: hunk.type,
-					diff: "",
-					added: 0,
-					removed: 0,
-				} satisfies ApplyPatchPreviewFile;
-				return hunk.type === "update" && hunk.movePath !== undefined ? { ...file, movePath: hunk.movePath } : file;
-			}) satisfies ApplyPatchPreviewFile[];
-			const preview: ApplyPatchPreview = { files, added: 0, removed: 0 };
-			collapsed = formatPatchPreview(preview, cwd, false);
-			expanded = formatPatchPreview(preview, cwd, true);
-		}
-	} catch {
-		// leave summaries empty for partial/incomplete patch text
-	}
-
-	const nextState: ApplyPatchRenderState = { cwd, patchText, callText, collapsed, expanded };
+	const nextState: ApplyPatchRenderState = { patchText, files: parseStreamingPatchFiles(patchText, true) };
 	applyPatchRenderStates.set(toolCallId, nextState);
 	return nextState;
 }
@@ -643,6 +631,57 @@ export function formatInFlightCallText(patchText: string): string {
 	const noun = paths.length === 1 ? "file" : "files";
 	const count = paths.length > 1 ? ` (${paths.length} ${noun})` : "";
 	return `Patching${count}: ${paths.join(", ")}`;
+}
+
+function parseStreamingPatchFiles(patchText: string, argsComplete: boolean = false): ApplyPatchCallFile[] {
+	const normalized = normalizePatchText(patchText);
+	// While streaming, ignore the last line until its newline arrives.
+	const completeText = argsComplete ? normalized : normalized.slice(0, normalized.lastIndexOf("\n") + 1);
+	const files: ApplyPatchCallFile[] = [];
+	let current: (typeof files)[number] | undefined;
+	for (const line of completeText.split("\n")) {
+		const header = line.match(/^\*\*\* (Add|Delete|Update) File: (.+)$/);
+		if (header) {
+			if (current) current.complete = true;
+			const operation = header[1];
+			current = {
+				operation: operation === "Add" ? "add" : operation === "Delete" ? "delete" : "update",
+				filePath: header[2] ?? "",
+				added: 0,
+				removed: 0,
+				complete: false,
+			};
+			files.push(current);
+		} else if (line === "*** End Patch") {
+			if (current) current.complete = true;
+		} else if (line.startsWith("*** Move to: ") && current?.operation === "update") {
+			current.movePath = line.slice("*** Move to: ".length);
+		} else if (current && line.startsWith("+")) {
+			current.added++;
+		} else if (current && line.startsWith("-")) {
+			current.removed++;
+		}
+	}
+
+	return files;
+}
+
+function renderLineCountSummary(added: number, removed: number, theme: ApplyPatchTheme): string {
+	return `(${theme.fg("toolDiffAdded", `+${added}`)} ${theme.fg("toolDiffRemoved", `-${removed}`)})`;
+}
+
+function renderPatchCall(files: ApplyPatchCallFile[], theme: ApplyPatchTheme, cwd: string): string {
+	const title = theme.fg("toolTitle", theme.bold("apply_patch: Patching"));
+	const rows = files.map((file) => {
+		const filePath = theme.fg("accent", theme.bold(displayPath(file.filePath, cwd)));
+		const destination = file.movePath ? ` → ${theme.fg("accent", theme.bold(displayPath(file.movePath, cwd)))}` : "";
+		const summary =
+			file.complete && file.operation !== "delete"
+				? ` ${renderLineCountSummary(file.added, file.removed, theme)}`
+				: "";
+		return `  └ ${formatPatchingOperation(file.operation)} ${filePath}${destination}${summary}`;
+	});
+	return [title, ...rows].join("\n");
 }
 
 type RenderableAddedDiffLine = { content: string; kind: "added"; lineNumber: string; sign: "+" };
@@ -1523,14 +1562,11 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 			};
 		},
 		renderCall(args, theme, context) {
-			if (!context.argsComplete) {
-				return new Text(theme.fg("toolTitle", theme.bold("apply_patch: Patching")), 0, 0);
-			}
-
 			const normalizedArgs = normalizeApplyPatchArguments(args);
-			const renderState = getApplyPatchRenderState(context.toolCallId, context.cwd, normalizedArgs.input);
-			const text = renderState.callText.length > 0 ? `apply_patch: ${renderState.callText}` : "apply_patch";
-			return new Text(theme.fg("toolTitle", theme.bold(text)), 0, 0);
+			const files = context.argsComplete
+				? getApplyPatchRenderState(context.toolCallId, normalizedArgs.input).files
+				: parseStreamingPatchFiles(normalizedArgs.input);
+			return new Text(renderPatchCall(files, theme, context.cwd), 0, 0);
 		},
 		renderResult(result, options, theme, context) {
 			const component = new Container();
@@ -1549,11 +1585,20 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 						: result.details?.result && result.details.result.failures.length > 0
 							? "Patch partially failed"
 							: "Applied patch";
-				const box = new Box(1, 1, (text: string) => applyLayeredBackground(theme, bgName, text));
-				box.addChild(new Text(theme.fg("toolTitle", theme.bold(title)), 0, 0));
-				box.addChild(new Spacer(1));
-				const expanded = options.isPartial ? true : (options.expanded ?? true);
-				box.addChild(new Text(renderPatchPreview(preview, context.cwd, theme, expanded), 0, 0));
+				const failed = (result.details?.result?.failures.length ?? 0) > 0;
+				const summary =
+					!options.isPartial && !failed
+						? `: edited ${preview.files.length} ${preview.files.length === 1 ? "file" : "files"} ${renderLineCountSummary(preview.added, preview.removed, theme)}`
+						: "";
+				const box = new Box(1, 0, (text: string) => applyLayeredBackground(theme, bgName, text));
+				box.addChild(new Text(`${theme.fg("toolTitle", theme.bold(title))}${summary}`, 0, 0));
+				if (options.expanded || failed) {
+					box.addChild(new Spacer(1));
+					box.addChild(new Text(renderPatchPreview(preview, context.cwd, theme, options.expanded), 0, 0));
+				}
+				if (!options.isPartial && !failed) {
+					component.addChild(new Spacer(1));
+				}
 				component.addChild(box);
 				return component;
 			}

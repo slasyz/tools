@@ -196,13 +196,73 @@ describe("render helpers", () => {
 		expect(rendered).toContain("apply_patch: Patching");
 	});
 
-	it("#given patch args #when rendering call #then shows paths and count", () => {
+	it("#given streaming patch args #when a file section ends #then shows its line counts without edit content", () => {
+		const tool = createApplyPatchTool();
+		const render = (input: string, argsComplete: boolean = false) => {
+			const component = tool.renderCall?.(
+				{ input },
+				identityTheme as never,
+				{ argsComplete, cwd: "/workspace/project", toolCallId: "stream-1" } as never,
+			);
+			const lines = component?.render(400) ?? [];
+			return lines.map((line) => line.trimEnd()).join("\n");
+		};
+
+		const first = render("*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+ne");
+		expect(first).toContain("apply_patch: Patching\n");
+		expect(first).toContain("└ editing src/a.ts");
+		expect(first).not.toContain("(+0 -1)");
+		expect(first).not.toContain("old");
+
+		const second = render(
+			"*** Begin Patch\n*** Update File: src/a.ts\n*** Move to: src/new.ts\n@@\n-old\n+new\n*** Add File: src/b",
+		);
+		expect(second).toContain("└ editing src/a.ts → src/new.ts");
+		expect(second).not.toContain("(+1 -1)");
+		expect(second).not.toContain("src/b");
+
+		const third = render(
+			"*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** Add File: src/b.ts\n+hello\n",
+		);
+		expect(third).toContain("└ editing src/a.ts (+1 -1)");
+		expect(third).toContain("└ adding src/b.ts");
+		expect(third).not.toContain("└ adding src/b.ts (+1 -0)");
+		expect(third).not.toContain("hello");
+
+		const complete = render(
+			"*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** Add File: src/b.ts\n+hello\n*** End Patch",
+			true,
+		);
+		expect(complete).toContain("└ editing src/a.ts (+1 -1)");
+		expect(complete).toContain("└ adding src/b.ts (+1 -0)");
+	});
+
+	it("#given many incoming files #when rendering call #then lists each file on a new line", () => {
+		const tool = createApplyPatchTool();
+		const input = `*** Begin Patch\n${Array.from({ length: 50 }, (_, i) => `*** Delete File: src/file-${i}.ts`).join("\n")}\n`;
+		const component = tool.renderCall?.(
+			{ input },
+			identityTheme as never,
+			{ argsComplete: false, cwd: "/workspace/project", toolCallId: "stream-large" } as never,
+		);
+		const rendered = component?.render(400).join("\n") ?? "";
+		expect(rendered.split("\n")).toHaveLength(51);
+		expect(rendered).toContain("└ deleting src/file-0.ts");
+		expect(rendered).toContain("└ deleting src/file-49.ts");
+		expect(rendered).not.toContain("(+0 -0)");
+	});
+
+	it("#given complete patch args #when rendering call #then shows each file and its patch line counts", () => {
 		// given
 		const tool = createApplyPatchTool();
 		const args = {
 			input: `*** Begin Patch
 *** Update File: src/a.ts
+@@
+-old
++new
 *** Add File: src/b.ts
++hello
 *** End Patch`,
 		};
 
@@ -216,13 +276,33 @@ describe("render helpers", () => {
 				toolCallId: "call-2",
 			} as never,
 		);
-		const rendered = component?.render(200).join("\n") ?? "";
+		const lines = component?.render(200) ?? [];
+		const rendered = lines.map((line) => line.trimEnd()).join("\n");
 
 		// then
-		expect(rendered).toContain("apply_patch: Patching (2 files): src/a.ts, src/b.ts");
+		expect(rendered).toContain("apply_patch: Patching\n");
+		expect(rendered).toContain("└ editing src/a.ts (+1 -1)");
+		expect(rendered).toContain("└ adding src/b.ts (+1 -0)");
 	});
 
-	it("#given preview #when rendering result collapsed #then shows headers without diff lines", () => {
+	it("#given complete files #when rendering call #then highlights filenames and added/removed counts", () => {
+		const tool = createApplyPatchTool();
+		const component = tool.renderCall?.(
+			{
+				input: "*** Begin Patch\n*** Update File: src/old.ts\n*** Move to: src/new.ts\n@@\n-old\n+new\n*** End Patch",
+			},
+			markerTheme as never,
+			{ argsComplete: true, cwd: "/workspace/project", toolCallId: "colored-call" } as never,
+		);
+		const rendered = component?.render(400).join("\n") ?? "";
+		expect(rendered).toContain("└ editing <fg:accent><bold>src/old.ts</bold></fg:accent>");
+		expect(rendered).toContain("→ <fg:accent><bold>src/new.ts</bold></fg:accent>");
+		expect(rendered).toContain(
+			"(<fg:toolDiffAdded>+1</fg:toolDiffAdded> <fg:toolDiffRemoved>-1</fg:toolDiffRemoved>)",
+		);
+	});
+
+	it("#given preview #when rendering result collapsed #then shows only one colored summary", () => {
 		// given
 		const tool = createApplyPatchTool();
 		const result = {
@@ -248,14 +328,23 @@ describe("render helpers", () => {
 		const component = tool.renderResult?.(
 			result,
 			{ expanded: false, isPartial: false },
-			identityTheme as never,
+			markerTheme as never,
 			{ cwd: "/workspace/project", toolCallId: "result-1", args: { input: "" } } as never,
 		);
 		const rendered = component?.render(200).join("\n") ?? "";
+		const lines = component?.render(200) ?? [];
 
 		// then
-		expect(rendered).toContain("• Edited src/foo.ts (+1 -1)");
+		expect(rendered).toContain("<bold>Applied patch</bold>");
+		expect(rendered).toContain(": edited 1 file");
+		expect(rendered).toContain(
+			"(<fg:toolDiffAdded>+1</fg:toolDiffAdded> <fg:toolDiffRemoved>-1</fg:toolDiffRemoved>)",
+		);
+		expect(rendered).not.toContain("src/foo.ts");
 		expect(rendered).not.toContain("+1 new");
+		expect(lines).toHaveLength(2);
+		expect(lines[0]).toBe("");
+		expect(lines[1]).toContain("Applied patch");
 	});
 
 	it("#given expanded preview #when rendering result #then uses OpenCode-like highlighted diff rows", () => {
@@ -332,9 +421,9 @@ describe("render helpers", () => {
 		// then
 		expect(rendered).toContain("<bg:toolPendingBg>");
 		expect(rendered).toContain("<bold>Applying patch (1/2)</bold>");
-		expect(rendered).toContain("• Edited src/foo.ts (+1 -1)");
-		expect(rendered).toContain("<fg:toolDiffRemoved>alpha <inverse>old</inverse></fg:toolDiffRemoved>");
-		expect(rendered).toContain("<fg:toolDiffAdded>alpha <inverse>new</inverse></fg:toolDiffAdded>");
+		expect(rendered).toContain("Applying patch (1/2)");
+		expect(rendered).not.toContain("src/foo.ts");
+		expect(rendered).not.toContain("alpha old");
 	});
 
 	it("#given multi-file preview #when rendering result collapsed #then shows grouped summary", () => {
@@ -364,9 +453,9 @@ describe("render helpers", () => {
 		const rendered = component?.render(400).join("\n") ?? "";
 
 		// then
-		expect(rendered).toContain("• Edited 2 files (+2 -0)");
-		expect(rendered).toContain("└ src/a.ts (+1 -0)");
-		expect(rendered).toContain("└ src/b.ts (+1 -0)");
+		expect(rendered).toContain("Applied patch: edited 2 files (+2 -0)");
+		expect(rendered).not.toContain("src/a.ts");
+		expect(rendered).not.toContain("src/b.ts");
 		expect(rendered).not.toContain("+1 one");
 	});
 

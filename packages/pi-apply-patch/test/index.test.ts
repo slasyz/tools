@@ -346,9 +346,8 @@ describe("pi-apply-patch", () => {
 		);
 		const rendered = component?.render(120).join("\n") ?? "";
 		expect(rendered).toContain("Applying patch");
-		expect(rendered).toContain("• Edited 2 files (+2 -1)");
-		expect(rendered).toContain("sample.txt (+1 -1)");
-		expect(rendered).toContain("+1 after");
+		expect(rendered).not.toContain("sample.txt");
+		expect(rendered).not.toContain("+1 after");
 		expect(rendered).not.toContain("Index:");
 	});
 
