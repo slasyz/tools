@@ -176,7 +176,7 @@ describe("render helpers", () => {
 		expect(callText).toContain("src/b.ts");
 	});
 
-	it("#given partial args #when rendering call #then shows patching placeholder", () => {
+	it("#given partial args #when rendering call #then shows tool title", () => {
 		// given
 		const tool = createApplyPatchTool();
 
@@ -193,7 +193,7 @@ describe("render helpers", () => {
 		const rendered = component?.render(120).join("\n") ?? "";
 
 		// then
-		expect(rendered).toContain("apply_patch: Patching");
+		expect(rendered).toContain("apply_patch:");
 	});
 
 	it("#given streaming patch args #when a file section ends #then shows its line counts without edit content", () => {
@@ -209,7 +209,7 @@ describe("render helpers", () => {
 		};
 
 		const first = render("*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+ne");
-		expect(first).toContain("apply_patch: Patching\n");
+		expect(first).toContain("apply_patch:\n");
 		expect(first).toContain("└ editing src/a.ts");
 		expect(first).not.toContain("(+0 -1)");
 		expect(first).not.toContain("old");
@@ -280,9 +280,26 @@ describe("render helpers", () => {
 		const rendered = lines.map((line) => line.trimEnd()).join("\n");
 
 		// then
-		expect(rendered).toContain("apply_patch: Patching\n");
+		expect(rendered).toContain("apply_patch:\n");
 		expect(rendered).toContain("└ editing src/a.ts (+1 -1)");
 		expect(rendered).toContain("└ adding src/b.ts (+1 -0)");
+	});
+
+	it("#given a resumed completed patch #when rendering call #then shows counts for the last file", () => {
+		const tool = createApplyPatchTool();
+		const input = "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch";
+		const render = (isPartial: boolean, patchText: string = input) => {
+			const component = tool.renderCall?.(
+				{ input: patchText },
+				identityTheme as never,
+				{ argsComplete: false, isPartial, cwd: "/workspace/project", toolCallId: "resumed-call" } as never,
+			);
+			return component?.render(200).join("\n") ?? "";
+		};
+
+		expect(render(true)).not.toContain("(+1 -1)");
+		expect(render(false)).toContain("└ editing src/a.ts (+1 -1)");
+		expect(render(false, "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new")).not.toContain("(+1 -1)");
 	});
 
 	it("#given complete files #when rendering call #then highlights filenames and added/removed counts", () => {

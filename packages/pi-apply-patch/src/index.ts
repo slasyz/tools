@@ -671,7 +671,7 @@ function renderLineCountSummary(added: number, removed: number, theme: ApplyPatc
 }
 
 function renderPatchCall(files: ApplyPatchCallFile[], theme: ApplyPatchTheme, cwd: string): string {
-	const title = theme.fg("toolTitle", theme.bold("apply_patch: Patching"));
+	const title = theme.fg("toolTitle", theme.bold("apply_patch:"));
 	const rows = files.map((file) => {
 		const filePath = theme.fg("accent", theme.bold(displayPath(file.filePath, cwd)));
 		const destination = file.movePath ? ` → ${theme.fg("accent", theme.bold(displayPath(file.movePath, cwd)))}` : "";
@@ -1563,7 +1563,9 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 		},
 		renderCall(args, theme, context) {
 			const normalizedArgs = normalizeApplyPatchArguments(args);
-			const files = context.argsComplete
+			const argsComplete =
+				context.argsComplete || (!context.isPartial && normalizedArgs.input.trimEnd().endsWith("*** End Patch"));
+			const files = argsComplete
 				? getApplyPatchRenderState(context.toolCallId, normalizedArgs.input).files
 				: parseStreamingPatchFiles(normalizedArgs.input);
 			return new Text(renderPatchCall(files, theme, context.cwd), 0, 0);

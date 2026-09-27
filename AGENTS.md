@@ -1,1 +1,5 @@
-Run pnpm commands with CI=true.
+# AGENTS
+
+## General
+
+- run pnpm commands with CI=true
