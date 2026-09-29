@@ -1481,7 +1481,7 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 		prepareArguments: normalizeApplyPatchArguments,
 		promptSnippet: "Apply Codex-format file patches with apply_patch",
 		promptGuidelines: [
-			"Use apply_patch for file edits instead of mutating files through bash, Python scripts, heredocs, or shell redirection.",
+			"Use apply_patch for file edits instead of mutating files through bash, Python scripts, heredocs, or shell redirection (unless user asks use any of those explicitly).",
 			"After apply_patch succeeds, do not re-read the edited files just to confirm the patch applied.",
 		],
 		async execute(
