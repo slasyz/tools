@@ -1,14 +1,15 @@
 # Expand Timeline
 
-Expands BB timeline activity summaries by default, including rows mounted while
+Expands BB timeline activity summaries and tool calls by default, including rows mounted while
 scrolling or switching threads. You can still collapse and reopen them manually.
 Choices stay in memory for the current app window and survive row remounts;
-reloading the app or plugin resets them. Individual tool output remains under
-BB’s normal controls.
+reloading the app or plugin resets them. Controls inside tool output, such as
+argument truncation, remain under BB’s normal controls.
 
 The content script is registered in `app.tsx` and implemented in `summary-defaults.ts`.
-It uses BB’s internal `:work-summary:`
-row IDs and summary header structure, so a BB update may require a selector update.
+It uses BB’s internal row IDs (`:work-summary:`, `:tool:`, `:command:`, and other
+tool activity kinds) and timeline header structure, so a BB update may require a
+selector update.
 
 ## Requirements
 
@@ -42,13 +43,13 @@ the source path after moving the plugin into this repository.
 The package name also determines the plugin ID: `bb-expand-timeline`. If you
 still have the old `expand-timeline` registration, remove it after installing
 the renamed package with `bb plugin remove expand-timeline`. This plugin stores
-no persistent settings or summary choices; removing the old registration leaves the local
+no persistent settings or expansion choices; removing the old registration leaves the local
 checkout on disk.
 
-Open a thread with an activity summary to verify that it expands. Manually
+Open a thread with an activity summary and tool calls to verify that they expand. Manually
 collapsing it should keep it closed, even after scrolling away and back. Reopen
-it with the same header; individual tool output should remain under BB's normal
-controls. Reloading the app or plugin should restore the expanded default.
+it with the same header. Nested tool calls expand too and can be collapsed
+independently. Reloading the app or plugin should restore the expanded default.
 
 ## Update a local install
 

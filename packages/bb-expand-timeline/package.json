@@ -25,7 +25,7 @@
   },
   "bb": {
     "name": "Expand Timeline",
-    "description": "Expand timeline activity summaries by default while allowing manual collapse.",
+    "description": "Expand timeline activity summaries and tool calls by default while allowing manual collapse.",
     "branding": {
       "icon": "ListView"
     },

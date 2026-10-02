@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { mountSummaryDefaults } from "../summary-defaults";
+import { mountTimelineDefaults } from "../summary-defaults";
 
 let frames: Map<number, FrameRequestCallback>;
 let dispose: (() => void) | undefined;
@@ -32,10 +32,10 @@ async function settle() {
     frames.clear();
     for (const callback of callbacks) callback(performance.now());
   }
-  throw new Error("Summary scans did not settle");
+  throw new Error("Timeline scans did not settle");
 }
 
-function makeRow(id = "thread:work-summary:1", expanded = false) {
+function makeTimelineRow(id: string, expanded = false) {
   const row = document.createElement("div");
   row.setAttribute("data-timeline-row-id", id);
   const header = document.createElement("div");
@@ -43,7 +43,7 @@ function makeRow(id = "thread:work-summary:1", expanded = false) {
   const button = document.createElement("button");
   button.setAttribute("aria-expanded", String(expanded));
   const label = document.createElement("span");
-  label.textContent = "Activity summary";
+  label.textContent = id;
   button.append(label);
   const onClick = vi.fn(() => {
     button.setAttribute("aria-expanded", String(button.getAttribute("aria-expanded") !== "true"));
@@ -56,14 +56,29 @@ function makeRow(id = "thread:work-summary:1", expanded = false) {
 
 function mount() {
   const controller = new AbortController();
-  dispose = mountSummaryDefaults(controller.signal);
+  dispose = mountTimelineDefaults(controller.signal);
   return controller;
 }
 
-describe("summary defaults", () => {
-  it("expands existing and newly added summaries, leaving open ones alone", async () => {
+describe.each([
+  "work-summary",
+  "tool",
+  "command",
+  "file-edit",
+  "web-search",
+  "web-fetch",
+  "image-view",
+  "image-generation",
+  "file-read",
+  "search",
+  "plan-steps",
+  "extension",
+  "delegation",
+])("%s defaults", (kind) => {
+  const makeRow = (id = `thread:${kind}:1`, expanded = false) => makeTimelineRow(id, expanded);
+  it("expands existing and newly added rows, leaving open ones alone", async () => {
     const closed = makeRow();
-    const open = makeRow("thread:work-summary:2", true);
+    const open = makeRow(`thread:${kind}:2`, true);
     document.body.append(closed.row, open.row);
     mount();
     await settle();
@@ -71,7 +86,7 @@ describe("summary defaults", () => {
     expect(closed.onClick).toHaveBeenCalledTimes(1);
     expect(open.onClick).not.toHaveBeenCalled();
 
-    const next = makeRow("thread:work-summary:3");
+    const next = makeRow(`thread:${kind}:3`);
     document.body.append(next.row);
     await settle();
     expect(next.button.getAttribute("aria-expanded")).toBe("true");
@@ -139,27 +154,62 @@ describe("summary defaults", () => {
     await settle();
     summary.button.click();
     await settle();
-    summary.row.setAttribute("data-timeline-row-id", "other-thread:work-summary:1");
+    summary.row.setAttribute("data-timeline-row-id", `other-thread:${kind}:1`);
     await settle();
     expect(summary.button.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("ignores individual tool output and nested tool headers", async () => {
+  it("expands nested tools and keeps parent and tool choices independent", async () => {
     const summary = makeRow();
-    const nested = makeRow("thread:tool:1");
-    const tool = makeRow("thread:tool:2");
+    const nested = makeRow("thread:tool:nested");
+    const tool = makeRow("thread:tool:standalone");
     summary.row.append(nested.row);
     document.body.append(summary.row, tool.row);
     mount();
     await settle();
-    expect(nested.onClick).not.toHaveBeenCalled();
-    expect(tool.onClick).not.toHaveBeenCalled();
+    expect(nested.button.getAttribute("aria-expanded")).toBe("true");
+    expect(tool.button.getAttribute("aria-expanded")).toBe("true");
     nested.button.click();
-    nested.button.click();
+    tool.button.click();
     summary.button.setAttribute("aria-expanded", "false");
     await settle();
     expect(summary.button.getAttribute("aria-expanded")).toBe("true");
     expect(nested.button.getAttribute("aria-expanded")).toBe("false");
+    expect(tool.button.getAttribute("aria-expanded")).toBe("false");
+
+    nested.button.click();
+    summary.button.click();
+    await settle();
+    expect(summary.button.getAttribute("aria-expanded")).toBe("false");
+    expect(nested.button.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("ignores output controls and unrelated rows", async () => {
+    const summary = makeRow();
+    const unrelated = makeTimelineRow("thread:op:reasoning:1");
+    const outputButton = document.createElement("button");
+    outputButton.setAttribute("aria-expanded", "false");
+    const onClick = vi.fn(() => {
+      outputButton.setAttribute(
+        "aria-expanded",
+        String(outputButton.getAttribute("aria-expanded") !== "true"),
+      );
+    });
+    outputButton.addEventListener("click", onClick);
+    summary.row.append(outputButton, unrelated.row);
+    document.body.append(summary.row);
+    mount();
+    await settle();
+    expect(onClick).not.toHaveBeenCalled();
+    expect(unrelated.onClick).not.toHaveBeenCalled();
+    outputButton.click();
+    unrelated.button.click();
+    unrelated.button.click();
+    summary.button.setAttribute("aria-expanded", "false");
+    await settle();
+    expect(summary.button.getAttribute("aria-expanded")).toBe("true");
+    expect(outputButton.getAttribute("aria-expanded")).toBe("true");
+    expect(unrelated.button.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("waits for a header mounted after its row", async () => {
@@ -195,9 +245,28 @@ describe("summary defaults", () => {
     await settle();
     expect(frames.size).toBe(0);
     expect(summary.onClick).not.toHaveBeenCalled();
-    const next = makeRow("thread:work-summary:2");
+    const next = makeRow(`thread:${kind}:2`);
     document.body.append(next.row);
     await settle();
     expect(next.onClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("nested row headers", () => {
+  it("does not use a nested tool's header when the parent header is missing", async () => {
+    const summary = makeTimelineRow("thread:work-summary:1");
+    const nested = makeTimelineRow("thread:tool:1");
+    const header = summary.row.firstElementChild!;
+    header.remove();
+    summary.row.append(nested.row);
+    document.body.append(summary.row);
+    mount();
+    await settle();
+    expect(summary.onClick).not.toHaveBeenCalled();
+    expect(nested.onClick).toHaveBeenCalledTimes(1);
+    summary.row.append(header);
+    await settle();
+    expect(summary.button.getAttribute("aria-expanded")).toBe("true");
+    expect(nested.onClick).toHaveBeenCalledTimes(1);
   });
 });

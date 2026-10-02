@@ -1,15 +1,31 @@
-const summarySelector = '[data-timeline-row-id*=":work-summary:"]';
+// BB gives tool-backed rows different IDs depending on the provider's activity kind.
+const rowKinds = [
+  "work-summary",
+  "tool",
+  "command",
+  "file-edit",
+  "web-search",
+  "web-fetch",
+  "image-view",
+  "image-generation",
+  "file-read",
+  "search",
+  "plan-steps",
+  "extension",
+  "delegation",
+];
+const rowSelector = rowKinds.map((kind) => `[data-timeline-row-id*=":${kind}:"]`).join(",");
 
-function summaryButton(row: Element) {
-  // Use the summary's own header, leaving nested tool output alone.
-  const button = row.querySelector<HTMLButtonElement>(
+function rowButton(row: Element) {
+  // Toggle only this row's header, not nested rows or controls inside tool output.
+  const buttons = row.querySelectorAll<HTMLButtonElement>(
     '[class~="group/timeline-row"] > button[aria-expanded]',
   );
-  return button?.closest("[data-timeline-row-id]") === row ? button : null;
+  return [...buttons].find((button) => button.closest("[data-timeline-row-id]") === row) ?? null;
 }
 
-export function mountSummaryDefaults(signal: AbortSignal) {
-  const collapsedSummaries = new Set<string>();
+export function mountTimelineDefaults(signal: AbortSignal) {
+  const collapsedRows = new Set<string>();
   let frame: number | null = null;
   let applyingDefaults = false;
   let disposed = false;
@@ -18,11 +34,11 @@ export function mountSummaryDefaults(signal: AbortSignal) {
     frame = null;
     if (signal.aborted || disposed) return;
 
-    for (const row of document.querySelectorAll(summarySelector)) {
+    for (const row of document.querySelectorAll(rowSelector)) {
       const rowId = row.getAttribute("data-timeline-row-id")!;
-      const button = summaryButton(row);
+      const button = rowButton(row);
       const expanded = button?.getAttribute("aria-expanded");
-      const desired = collapsedSummaries.has(rowId) ? "false" : "true";
+      const desired = collapsedRows.has(rowId) ? "false" : "true";
       if (button && (expanded === "true" || expanded === "false") && expanded !== desired) {
         // Our own clicks must not be recorded as manual choices.
         applyingDefaults = true;
@@ -39,15 +55,15 @@ export function mountSummaryDefaults(signal: AbortSignal) {
     if (applyingDefaults || signal.aborted || disposed || !(event.target instanceof Element))
       return;
     const button = event.target.closest<HTMLButtonElement>("button[aria-expanded]");
-    const row = button?.closest(summarySelector);
-    if (!button || !row || summaryButton(row) !== button) return;
+    const row = button?.closest("[data-timeline-row-id]");
+    if (!button || !row?.matches(rowSelector) || rowButton(row) !== button) return;
 
     const rowId = row.getAttribute("data-timeline-row-id")!;
     // Capture runs before BB toggles the header, including keyboard-generated clicks.
     if (button.getAttribute("aria-expanded") === "true") {
-      collapsedSummaries.add(rowId);
+      collapsedRows.add(rowId);
     } else {
-      collapsedSummaries.delete(rowId);
+      collapsedRows.delete(rowId);
     }
   }
 
@@ -66,7 +82,7 @@ export function mountSummaryDefaults(signal: AbortSignal) {
     frame = null;
     document.removeEventListener("click", recordChoice, true);
     signal.removeEventListener("abort", dispose);
-    collapsedSummaries.clear();
+    collapsedRows.clear();
   }
 
   if (signal.aborted) return dispose;

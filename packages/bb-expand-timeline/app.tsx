@@ -1,12 +1,12 @@
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
 
-import { mountSummaryDefaults } from "./summary-defaults";
+import { mountTimelineDefaults } from "./summary-defaults";
 
 export default definePluginApp((app) => {
   app.contentScripts.register({
-    id: "expand-activity-summaries",
+    id: "expand-timeline-rows",
     mount({ signal }) {
-      return mountSummaryDefaults(signal);
+      return mountTimelineDefaults(signal);
     },
   });
 });
