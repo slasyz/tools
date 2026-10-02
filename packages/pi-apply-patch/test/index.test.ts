@@ -377,11 +377,75 @@ describe("pi-apply-patch", () => {
 
 		// then
 		expect(result.details?.preview).toBeDefined();
+		expect(result.content).toEqual([
+			{
+				type: "text",
+				text: "Applied patch: edited 1 file (+1 -1)\n\n• Edited sample.txt (+1 -1)\n-1 before\n+1 after",
+			},
+		]);
 		expect(rendered).toContain("Applied patch");
 		expect(rendered).toContain("• Edited sample.txt (+1 -1)");
 		expect(rendered).toContain("-1 before");
 		expect(rendered).toContain("+1 after");
 		expect(await readFile(path.join(directory, "sample.txt"), "utf-8")).toBe("after\n");
+	});
+
+	it("#given mixed file actions #when executed #then final text includes grouped expanded preview", async () => {
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "old.txt"), "old\n", "utf-8");
+		const patch = `*** Begin Patch
+*** Add File: new.txt
++new
+*** Delete File: old.txt
+*** End Patch`;
+
+		const result = await createAuthorizedApplyPatchTool().execute(
+			"apply-patch-final-multiple",
+			{ input: patch },
+			undefined,
+			undefined,
+			{ cwd: directory } as never,
+		);
+
+		expect(result.content).toEqual([
+			{
+				type: "text",
+				text: [
+					"Applied patch: edited 2 files (+1 -1)",
+					"",
+					"• Edited 2 files (+1 -1)",
+					"  └ new.txt (+1 -0)",
+					"    +1 new",
+					"  └ old.txt (+0 -1)",
+					"    -1 old",
+				].join("\n"),
+			},
+		]);
+		expect(result.details?.result?.summaries).toEqual(["add: new.txt", "delete: old.txt"]);
+	});
+
+	it("#given rename-only patch #when executed #then final text shows source and destination", async () => {
+		const directory = await createTempDirectory();
+		await writeFile(path.join(directory, "old.txt"), "", "utf-8");
+		const patch = `*** Begin Patch
+*** Update File: old.txt
+*** Move to: new.txt
+*** End Patch`;
+
+		const result = await createAuthorizedApplyPatchTool().execute(
+			"apply-patch-final-rename",
+			{ input: patch },
+			undefined,
+			undefined,
+			{ cwd: directory } as never,
+		);
+
+		expect(result.content).toEqual([
+			{
+				type: "text",
+				text: "Applied patch: edited 1 file (+0 -0)\n\n• Edited old.txt → new.txt (+0 -0)",
+			},
+		]);
 	});
 
 	it("#given nested cwd #when previewing absolute workspace path #then formats relative to cwd", async () => {
@@ -433,7 +497,7 @@ describe("pi-apply-patch", () => {
 		const updates: string[] = [];
 
 		// when
-		await createAuthorizedApplyPatchTool().execute(
+		const result = await createAuthorizedApplyPatchTool().execute(
 			"apply-patch-large-preview-test",
 			{ input: patch },
 			undefined,
@@ -450,6 +514,12 @@ describe("pi-apply-patch", () => {
 		expect(updates[0]).toContain("-30 line-30");
 		expect(updates[0]).toContain("+30 line-30 updated");
 		expect(updates[0]).not.toContain(" 1 line-1");
+		const finalText = result.content.find((block) => block.type === "text")?.text ?? "";
+		expect(finalText).toContain("Applied patch: edited 1 file (+1 -1)");
+		expect(finalText).toContain("-30 line-30");
+		expect(finalText).toContain("+30 line-30 updated");
+		expect(finalText).toContain("…");
+		expect(finalText).not.toContain(" 1 line-1");
 		expect(await readFile(path.join(directory, "large.txt"), "utf-8")).toContain("line-30 updated");
 	});
 

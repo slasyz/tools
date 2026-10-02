@@ -1,0 +1,36 @@
+{
+  "name": "bb-expand-timeline",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "bb plugin build",
+    "check": "tsc --noEmit",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.5.29",
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^26.1.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "bb": ">=0.44",
+    "bbPluginSdk": ">=0.5.29"
+  },
+  "bb": {
+    "name": "Expand Timeline",
+    "description": "Expand timeline activity summaries by default while allowing manual collapse.",
+    "branding": {
+      "icon": "ListView"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx",
+    "skills": []
+  }
+}

@@ -39,6 +39,23 @@ Pi exposes this as a freeform grammar tool. Models with `compat.supportsOpenAIGr
 
 Custom provider names are supported when the model id starts with `gpt-` and its Pi API is `openai-responses` or `openai-codex-responses`. For example, a model registered as `my-proxy/gpt-5` with `api: "openai-responses"` activates `apply_patch` without adding the provider name to a hard-coded allowlist.
 
+Successful tool result text includes the expanded TUI summary and diff preview
+without colors. RPC clients that display the final result's text see, for example:
+
+```text
+Applied patch: edited 1 file (+1 -1)
+
+• Edited hello.py (+1 -1)
+-1 print("Hi")
++1 print("Hello")
+```
+
+The preview uses the same per-file truncation limits as the TUI. Structured
+`details.preview` and `details.result` remain available. This text also goes to
+the model as the tool result; it is not an RPC-only display override. If preview
+creation fails, the result falls back to file-action summaries. Failure and
+recovery messages stay unchanged.
+
 ## Authorization
 
 After parsing and validating a complete patch, the tool requests write access

@@ -1,5 +1,6 @@
 # Tools
 
+- [`bb-expand-timeline`](./packages/bb-expand-timeline/) — Expand BB timeline activity summaries by default, with manual collapse.
 - [`sandbox`](./packages/sandbox/) — Shared sandbox configuration and runtime utilities.
 - [`pi-apply-patch`](./packages/pi-apply-patch/) — Codex-style `apply_patch` tool extension for Pi.
 - [`pi-sandbox`](./packages/pi-sandbox/) — OS-level sandboxing and permission prompts for Pi.

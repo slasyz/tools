@@ -583,11 +583,7 @@ export function formatPatchPreview(
 		if (file) {
 			lines.push(formatPatchFileHeader(file, cwd));
 			if (expanded && file.diff) {
-				lines.push(
-					...truncatePreview(file.diff)
-						.split("\n")
-						.map((line) => `  ${line}`),
-				);
+				lines.push(truncatePreview(file.diff));
 			}
 		}
 		return lines.join("\n");
@@ -1399,19 +1395,15 @@ async function createPendingPatchUpdate(
 		}
 
 		const preview = await createPatchPreview(cwd, hunks);
-		if (preview.files.some((file) => file.diff.trim().length > 0)) {
-			const details: ApplyPatchToolDetails = { preview };
-			if (progress) details.progress = progress;
-			return { text: `${title}\n${formatPatchPreview(preview, cwd)}`, details };
-		}
+		const details: ApplyPatchToolDetails = { preview };
+		if (progress) details.progress = progress;
+		return { text: `${title}\n${formatPatchPreview(preview, cwd)}`, details };
 	} catch {
 		return {
 			text: progress ? title : formatPendingPatchPaths(patchText),
 			details: progress ? { progress } : undefined,
 		};
 	}
-
-	return { text: progress ? title : formatPendingPatchPaths(patchText), details: progress ? { progress } : undefined };
 }
 
 function withoutExtensionManagedEditTools(toolNames: string[]): string[] {
@@ -1556,8 +1548,11 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 				};
 			}
 
+			const text = preview
+				? `Applied patch: edited ${preview.files.length} ${preview.files.length === 1 ? "file" : "files"} ${formatLineCountSummary(preview.added, preview.removed)}\n\n${formatPatchPreview(preview, ctx.cwd)}`
+				: result.summaries.join("\n");
 			return {
-				content: [{ type: "text", text: result.summaries.join("\n") }],
+				content: [{ type: "text", text }],
 				details: preview ? { preview, result } : { result },
 			};
 		},
