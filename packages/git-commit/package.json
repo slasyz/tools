@@ -5,7 +5,7 @@
   "description": "Generate, refine, and review Git commit subjects with Pi",
   "license": "MIT",
   "bin": {
-    "git-commit2": "./dist/cli.js"
+    "git-commit": "./dist/cli.js"
   },
   "files": [
     "dist",
@@ -17,10 +17,12 @@
     "check": "tsc --noEmit",
     "test": "node --test test/*.test.ts"
   },
+  "dependencies": {
+    "chalk": "^6.0.0",
+    "git-commit": "link:",
+    "wrap-ansi": "^9.0.0"
+  },
   "engines": {
     "node": ">=22.19.0"
-  },
-  "dependencies": {
-    "git-commit": "link:"
   }
 }

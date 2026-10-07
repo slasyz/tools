@@ -17,7 +17,7 @@ test("captures stdout, stderr, and nonzero exit status", async () => {
 });
 
 test("reports a missing executable", async () => {
-  await assert.rejects(run("/nonexistent/git-commit2-command", []), /was not found on PATH/);
+  await assert.rejects(run("/nonexistent/git-commit-command", []), /was not found on PATH/);
 });
 
 test("abort waits for the child to exit", async () => {

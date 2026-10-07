@@ -1,8 +1,10 @@
 import { join } from "node:path";
 
+import chalk from "chalk";
 import { readFile, rm, writeFile } from "node:fs/promises";
 
 import { askForAction, type Action } from "./input.ts";
+import { formatContext, formatMessage } from "./output.ts";
 import { checked, CommandError, run } from "./process.ts";
 import { firstSubject, makePrompt, MODELS } from "./prompt.ts";
 
@@ -18,18 +20,26 @@ export async function main(
   let tempDir: string | undefined;
   try {
     if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
-      console.log("Usage: git-commit2 [-s]\n  -s  Select a model with fzf");
+      console.log("Usage: git-commit [-s]\n  -s  Select a listed or custom model with fzf");
       return 0;
     }
     if (args.length > 1 || (args.length === 1 && args[0] !== "-s")) {
-      throw new CommandError("Usage: git-commit2 [-s]", 2);
+      throw new CommandError("Usage: git-commit [-s]", 2);
     }
 
     let model: string = MODELS[0];
     if (args[0] === "-s") {
       const result = await run(
         "fzf",
-        ["--height=14", "--border", "--no-sort", "--layout=reverse", "--prompt=Model: "],
+        [
+          "--height=14",
+          "--border",
+          "--no-sort",
+          "--layout=reverse",
+          "--prompt=Model: ",
+          "--bind=enter:accept-or-print-query",
+          "--header=Enter: select match or use typed name when nothing matches · Esc: cancel",
+        ],
         {
           signal,
           input: `${MODELS.join("\n")}\n`,
@@ -56,7 +66,7 @@ export async function main(
     if (changes.code > 1)
       throw new CommandError(changes.stderr.trim() || "could not inspect changes.");
     if (changes.code === 0) {
-      console.log(`git-commit2: no ${scope} to commit.`);
+      console.log(`git-commit: no ${scope} to commit.`);
       return 0;
     }
 
@@ -64,14 +74,18 @@ export async function main(
       throw new CommandError("an interactive terminal is required to review the message.");
     }
 
-    console.log(`Files with ${scope}:\n${await git(["diff", ...diffArgs, "--name-status"])}`);
+    const files = await git(["diff", "--color=never", ...diffArgs, "--name-status"]);
     const head = await run("git", ["rev-parse", "--verify", "HEAD"], { signal });
-    const subjects = head.code === 0 ? await git(["log", "-n", "5", "--format=%s"]) : "";
-    const prompt = makePrompt(subjects, await git(["diff", "--unified=1", ...diffArgs]));
-    console.log(`Prompt:\n${prompt}`);
+    const subjects =
+      head.code === 0 ? await git(["log", "--color=never", "-n", "5", "--format=%s"]) : "";
+    const diff = await git(["diff", "--color=never", "--unified=1", ...diffArgs]);
+    const prompt = makePrompt(subjects, diff);
+    const displayDiff =
+      chalk.level > 0 ? await git(["diff", "--color=always", "--unified=1", ...diffArgs]) : diff;
+    console.log(`\n${formatContext({ scope, files, subjects, diff: displayDiff })}`);
 
     tempDir = (
-      await checked("mktemp", ["-d", "-p", "/tmp", "git-commit2.XXXXXX"], { signal })
+      await checked("mktemp", ["-d", "-p", "/tmp", "git-commit.XXXXXX"], { signal })
     ).trim();
     const requestFile = join(tempDir, "request.txt");
     const sessionFile = join(tempDir, "session.jsonl");
@@ -79,12 +93,13 @@ export async function main(
     const editor = process.env.VISUAL || process.env.EDITOR || "vi";
     let message = "";
     let generatedSubject = "";
-    let generationSeconds = 0;
 
     async function generate(userMessage: string) {
       await writeFile(requestFile, userMessage, { mode: 0o600 });
-      console.log(`\nGenerating commit message with ${model}...\n`);
-      const started = Date.now();
+      console.log(
+        `\n${chalk.bold.cyan("Generating commit message with")} ${chalk.bold.white(model)}...\n`,
+      );
+      const started = performance.now();
       // Reopen only this temporary session so feedback follows prior user/assistant turns.
       const result = await run(
         "pi",
@@ -108,14 +123,18 @@ export async function main(
       message = firstSubject(result.stdout);
       if (!message) throw new CommandError("pi returned an empty commit message.");
       generatedSubject = message;
-      generationSeconds = Math.floor((Date.now() - started) / 1000);
+      return (performance.now() - started) / 1000;
     }
 
-    await generate(prompt);
+    const stats = {
+      promptChars: Array.from(prompt).length,
+      diffLines: diff ? diff.replace(/\r?\n$/, "").split(/\r?\n/).length : 0,
+      seconds: await generate(prompt),
+    };
+    let firstSuggestion = true;
     while (true) {
-      console.log(
-        `Proposed commit message (generated in ${generationSeconds} second(s)):\n  ${message}\n`,
-      );
+      console.log(formatMessage(message, firstSuggestion ? stats : undefined));
+      firstSuggestion = false;
       const action = await ask(signal);
       if (action.type === "accept") {
         return (
@@ -135,26 +154,26 @@ export async function main(
       // The editor command is trusted user configuration; pass the filename separately.
       const edited = await run(
         "/bin/sh",
-        ["-c", `exec ${editor} "$1"`, "git-commit2-editor", messageFile],
+        ["-c", `exec ${editor} "$1"`, "git-commit-editor", messageFile],
         { signal, inherit: true },
       );
       if (edited.code !== 0) {
-        console.error("git-commit2: editor failed; keeping the proposed message.");
+        console.error("git-commit: editor failed; keeping the proposed message.");
         continue;
       }
       const editedMessage = firstSubject(await readFile(messageFile, "utf8"));
       if (!editedMessage)
         console.error(
-          "git-commit2: editor produced an empty message; keeping the proposed message.",
+          "git-commit: editor produced an empty message; keeping the proposed message.",
         );
       else message = editedMessage;
     }
   } catch (error) {
     if (signal?.aborted) {
-      console.error("\ngit-commit2: stopped.");
+      console.error("\ngit-commit: stopped.");
       return 130;
     }
-    console.error(`git-commit2: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`git-commit: ${error instanceof Error ? error.message : String(error)}`);
     return error instanceof CommandError ? error.exitCode : 1;
   } finally {
     if (tempDir) await rm(tempDir, { recursive: true, force: true });

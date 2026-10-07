@@ -1,6 +1,7 @@
 import { createInterface, emitKeypressEvents } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
+import { formatReviewPrompt } from "./output.ts";
 import { CommandError } from "./process.ts";
 
 export type Action = { type: "accept" } | { type: "feedback"; text: string } | { type: "edit" };
@@ -56,9 +57,7 @@ export function askForAction(
     rl.on("close", () => finish());
     input.on("keypress", onKeypress);
     signal?.addEventListener("abort", onAbort, { once: true });
-    rl.setPrompt(
-      "Enter: accept · Type feedback + Enter: regenerate · Ctrl-G: edit · Ctrl-C: stop\n> ",
-    );
+    rl.setPrompt(formatReviewPrompt());
     rl.prompt();
   });
 }

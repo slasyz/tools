@@ -1,7 +1,7 @@
 # Tools
 
 - [`bb-expand-timeline`](./packages/bb-expand-timeline/) — Expand BB timeline activity summaries by default, with manual collapse.
-- [`git-commit`](./packages/git-commit/) — Generate and refine commit subjects with Pi; runs as `git-commit2`.
+- [`git-commit`](./packages/git-commit/) — Generate and refine commit subjects with Pi.
 - [`sandbox`](./packages/sandbox/) — Shared sandbox configuration and runtime utilities.
 - [`pi-apply-patch`](./packages/pi-apply-patch/) — Codex-style `apply_patch` tool extension for Pi.
 - [`pi-sandbox`](./packages/pi-sandbox/) — OS-level sandboxing and permission prompts for Pi.

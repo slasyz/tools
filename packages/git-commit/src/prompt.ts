@@ -1,5 +1,6 @@
 export const MODELS = [
   "opencode-go/gpt-6-luna",
+  "opencode/claude-haiku-5-5",
   "opencode-go/deepseek-v4.1-flash",
   "opencode-go/gpt-5.6-luna",
   "openrouter/google/gemini-3.8-flash",
@@ -13,7 +14,7 @@ export const MODELS = [
   "openrouter/openai/gpt-oss-120b",
 ] as const;
 
-const INSTRUCTIONS =
+export const INSTRUCTIONS =
   "Generate a Git commit message from the supplied diff. Output exactly one short, tidy commit subject line and nothing else: no quotes, Markdown, explanation, bullet points, body, or surrounding whitespace. Use imperative mood, describe the actual change, keep it under 100 characters, start with capital letter, and do not end with a period. Use the recent commit subjects only as style context; do not copy them unless they accurately describe this diff. If there are several unrelated changes in this commit, describe them all.";
 
 // Match the reference script: keep filenames and code, without hunk positions or hashes.
