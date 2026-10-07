@@ -17,19 +17,17 @@ selector update.
 - Node.js and the pnpm version configured in the repository's root `package.json`.
 - A running BB server for install, reload, and development watch mode.
 
-Use pnpm from the repository root, not npm inside this package. Dependencies
-are managed by the root `pnpm-lock.yaml`; `pnpm-workspace.yaml` already includes
-this package.
+Run the commands below from `packages/bb-expand-timeline`. Use pnpm, not npm:
+it uses the workspace and root `pnpm-lock.yaml`; `pnpm-workspace.yaml` already
+includes this package.
 
 ## Install from this checkout
 
-Run from the repository root:
-
 ```bash
-CI=true pnpm install --frozen-lockfile
-CI=true pnpm --filter bb-expand-timeline run check
-CI=true pnpm --filter bb-expand-timeline run build
-bb plugin install "$(pwd)/packages/bb-expand-timeline"
+pnpm install --frozen-lockfile
+pnpm check
+pnpm build
+bb plugin install "$(pwd)"
 bb plugin source bb-expand-timeline
 bb plugin list
 ```
@@ -53,12 +51,12 @@ independently. Reloading the app or plugin should restore the expanded default.
 
 ## Update a local install
 
-After pulling repository changes, run from the repository root:
+After pulling repository changes:
 
 ```bash
-CI=true pnpm install --frozen-lockfile
-CI=true pnpm --filter bb-expand-timeline run check
-CI=true pnpm --filter bb-expand-timeline run build
+pnpm install --frozen-lockfile
+pnpm check
+pnpm build
 bb plugin reload bb-expand-timeline
 ```
 
@@ -67,32 +65,31 @@ Local installs use the checkout's current files. Use build and reload, not
 
 ## Development
 
-Install the plugin locally first, then start the watch loop from the repository
-root:
+Install the plugin locally first, then start the watch loop:
 
 ```bash
-bb plugin dev ./packages/bb-expand-timeline
+bb plugin dev .
 ```
 
 BB rebuilds the frontend and reloads the plugin when sources change. Stop with
 Ctrl+C. For a manual update, run the check, build, and reload commands above.
 
 The package's `check` script also runs through the repository-wide
-`CI=true pnpm run check`. Format only this package when editing it:
+`pnpm --dir ../.. run check`. Format only this package when editing it:
 
 ```bash
-CI=true pnpm exec oxfmt packages/bb-expand-timeline
+pnpm exec oxfmt .
 ```
 
-Run the DOM behavior tests with `CI=true pnpm --filter bb-expand-timeline run test`.
+Run the DOM behavior tests with `pnpm test`.
 
-After changing dependencies, run `CI=true pnpm install --no-frozen-lockfile`
-from the repository root and commit the manifest and root lockfile changes.
+After changing dependencies, run `pnpm install --no-frozen-lockfile` and commit
+the manifest and root lockfile changes.
 
 After a BB upgrade, check whether the SDK pin still matches the installed CLI:
 
 ```bash
-bb plugin types ./packages/bb-expand-timeline --check
+bb plugin types . --check
 ```
 
 If it reports a mismatch, run the same command without `--check`, review the

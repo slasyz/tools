@@ -1,0 +1,16 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  git-commit: 'link:'
+
+importers:
+
+  .:
+    dependencies:
+      git-commit:
+        specifier: 'link:'
+        version: 'link:'

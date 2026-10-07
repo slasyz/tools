@@ -7,16 +7,14 @@ OS-level sandboxing and permission prompts for [Pi](https://pi.dev/) on macOS an
 
 ## Install from a GitHub checkout
 
-This is a private workspace package, not an npm release. Clone the repository,
-install its workspace dependencies with `pnpm install`, then load the local Pi
-packages from that checkout:
+This is a private workspace package, not an npm release. Run the commands below
+from `packages/pi-sandbox` in a cloned repository checkout. Install the workspace
+dependencies, then load the local Pi packages:
 
 ```bash
-git clone <your-repository-git-url> tools
-cd tools
 pnpm install
-pi install "$(pwd)/packages/pi-apply-patch"
-pi install "$(pwd)/packages/pi-sandbox"
+pi install "$(pwd)/../pi-apply-patch"
+pi install "$(pwd)"
 ```
 
 Keep the checkout and its `node_modules`: `pi-sandbox` resolves `sandbox` through

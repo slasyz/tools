@@ -1,0 +1,26 @@
+{
+  "name": "git-commit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generate, refine, and review Git commit subjects with Pi",
+  "license": "MIT",
+  "bin": {
+    "git-commit2": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "git-commit": "link:"
+  }
+}

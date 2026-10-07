@@ -69,12 +69,12 @@ Use `getApplyPatchMutations(patchText)` when only parser-validated mutation extr
 
 ## Installation
 
-The package targets the [`pi`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) coding agent. Install it with `pi-sandbox` from the repository checkout:
+The package targets the [`pi`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) coding agent. Run the commands below from `packages/pi-apply-patch` in the repository checkout. Install it with `pi-sandbox`:
 
 ```bash
 pnpm install
-pi install "$(pwd)/packages/pi-apply-patch"
-pi install "$(pwd)/packages/pi-sandbox"
+pi install "$(pwd)"
+pi install "$(pwd)/../pi-sandbox"
 ```
 
 After installation, restart pi or run `/reload` inside an interactive session.
@@ -89,10 +89,10 @@ files directly in the Pi process, outside the subprocess OS sandbox;
 ## Development
 
 ```bash
-npm install
-npm test
-npm run typecheck
-npm run check
+pnpm install
+pnpm test
+pnpm typecheck
+pnpm check
 npm pack --dry-run
 pi -e ./index.ts
 ```

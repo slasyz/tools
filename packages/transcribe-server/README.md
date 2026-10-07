@@ -5,6 +5,8 @@ Local OpenAI-style audio transcription server. Listens on
 
 ## Build
 
+Run the commands below from `packages/transcribe-server`.
+
 Building requires CMake and a C++ toolchain (such as Apple's Command Line
 Tools); running requires `ffmpeg`. On macOS:
 
@@ -20,8 +22,8 @@ To run without installing, use `cargo run`.
 
 ## Use
 
-Place GGUF models in `~/.local/share/transcribe-server/models/`. 
-Use the file name without `.gguf` as the `model` value 
+Place GGUF models in `~/.local/share/transcribe-server/models/`.
+Use the file name without `.gguf` as the `model` value
 (for example, `whisper-base.en` or `gigaam-v3-e2e-rnnt-Q4_K_M.gguf`).
 
 Run `transcribe-server` (stop the service first if it is running). Example request:
