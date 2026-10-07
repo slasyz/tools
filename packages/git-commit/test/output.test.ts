@@ -54,7 +54,7 @@ test("character and diff line counts group thousands and millions", () => {
     stripVTControlCharacters(
       formatGenerationStart("provider/model", { promptChars: 1234567, diffLines: 12345 }),
     ),
-    "Generating commit message with provider/model (1,234,567 chars, 12,345 LoC)...",
+    "Generating commit message with provider/model (thinking: minimal) (1,234,567 chars, 12,345 LoC)...",
   );
   assert.match(
     stripVTControlCharacters(
@@ -78,10 +78,17 @@ test("benchmark start shows the shared input size and diff line count", () => {
   );
 });
 
-test("benchmark results put only elapsed time on the model heading", () => {
+test("generation without statistics still shows the thinking level", () => {
+  assert.equal(
+    stripVTControlCharacters(formatGenerationStart("provider/model")),
+    "Generating commit message with provider/model (thinking: minimal)...",
+  );
+});
+
+test("benchmark results show the thinking level and elapsed time on the model heading", () => {
   assert.equal(
     stripVTControlCharacters(formatBenchmarkResult("provider/model", "Add benchmark mode", 8.126)),
-    "Model provider/model (8.13s)\n  Add benchmark mode\n",
+    "Model provider/model (thinking: minimal) (8.13s)\n  Add benchmark mode\n",
   );
 });
 

@@ -11,10 +11,26 @@ import assert from "node:assert/strict";
 import type { Action } from "../src/input.ts";
 
 import { formatBenchmarkStart, formatContext } from "../src/output.ts";
-import { BENCHMARK_MODELS, makePrompt, MODELS } from "../src/prompt.ts";
+import { BENCHMARK_MODELS, INSTRUCTIONS, makePrompt, MODELS } from "../src/prompt.ts";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+function assertIsolatedGeneration(args: string[]) {
+  for (const flag of [
+    "--no-tools",
+    "--no-extensions",
+    "--no-skills",
+    "--no-context-files",
+    "--no-prompt-templates",
+  ]) {
+    assert.ok(args.includes(flag), `Missing ${flag}`);
+  }
+  assert.ok(args.includes("--system-prompt"));
+  assert.equal(args[args.indexOf("--system-prompt") + 1], INSTRUCTIONS);
+  assert.ok(args.includes("--thinking"));
+  assert.equal(args[args.indexOf("--thinking") + 1], "minimal");
+}
 
 function setup(t: TestContext, initialCommit = true) {
   const root = execFileSync("mktemp", ["-d", "-p", "/tmp", "git-commit-test.XXXXXX"], {
@@ -144,9 +160,10 @@ test("staged changes take priority and feedback continues the same conversation"
       ` \\(${Array.from(calls[0].request).length.toLocaleString("en-US")} chars, ${diffLines.toLocaleString("en-US")} LoC\\)\\.\\.\\.$`,
     ),
   );
+  assert.ok(generationHeadings[0].includes(`${MODELS[0]} (thinking: minimal)`));
   assert.deepEqual(generationHeadings.slice(1), [
-    `Generating commit message with ${MODELS[0]}...`,
-    `Generating commit message with ${MODELS[0]}...`,
+    `Generating commit message with ${MODELS[0]} (thinking: minimal)...`,
+    `Generating commit message with ${MODELS[0]} (thinking: minimal)...`,
   ]);
   assert.deepEqual(headings.slice(1), ["Proposed commit message", "Proposed commit message"]);
   assert.match(calls[0].request, /Initial test commit/);
@@ -156,7 +173,7 @@ test("staged changes take priority and feedback continues the same conversation"
   assert.equal(calls[1].history[1].text, "First subject");
   assert.equal(calls[2].history[3].text, "Second subject");
   assert.equal(new Set(calls.map((call) => call.session)).size, 1);
-  assert.ok(calls[0].args.includes("--no-tools"));
+  for (const call of calls) assertIsolatedGeneration(call.args);
   assert.equal(calls[0].args[calls[0].args.indexOf("--model") + 1], MODELS[0]);
   assert.equal(existsSync(dirname(calls[0].session)), false);
 });
@@ -310,6 +327,7 @@ test("-s selects the model with fzf", (t) => {
   );
   assert.equal(result.status, 0, result.stderr);
   const args = requests()[0].args;
+  assertIsolatedGeneration(args);
   assert.equal(args[args.indexOf("--model") + 1], MODELS[1]);
   assert.equal(git("log", "-1", "--format=%s"), "Selected model subject");
 });
@@ -398,7 +416,7 @@ test("-b benchmarks the selected models in parallel without a terminal or commit
   for (const call of calls) {
     assert.equal(call.request, expectedPrompt);
     assert.deepEqual(call.history, []);
-    assert.ok(call.args.includes("--no-tools"));
+    assertIsolatedGeneration(call.args);
     assert.equal(existsSync(dirname(call.session)), false);
   }
   const expectedContext = formatContext({
@@ -423,7 +441,7 @@ test("-b benchmarks the selected models in parallel without a terminal or commit
     .split(/\n\n/);
   assert.equal(lines.length, 4);
   for (const block of lines) {
-    const match = block.match(/^Model (\S+) \(\d+\.\d{2}s\)\n  (.+)$/)!;
+    const match = block.match(/^Model (\S+) \(thinking: minimal\) \(\d+\.\d{2}s\)\n  (.+)$/)!;
     assert.ok(match, block);
     assert.equal(match[2], outputs[match[1]]);
   }
@@ -450,6 +468,9 @@ test("-b lets other models finish when one fails or returns an empty subject", (
     );
     assert.equal(result.status, 1, result.stderr);
     assert.ok(result.stderr.includes(failedModel));
+    assert.ok(
+      stripVTControlCharacters(result.stderr).includes(`Model ${failedModel} (thinking: minimal)`),
+    );
     assert.equal(result.stdout.match(/Successful subject/g)?.length, 3);
     const calls = requests();
     assert.equal(calls.length, 4);

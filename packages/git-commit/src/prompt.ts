@@ -1,3 +1,5 @@
+export const THINKING_LEVEL = "minimal";
+
 export const MODELS = [
   "opencode-go/gpt-6-luna",
   "opencode/claude-haiku-5-5",

@@ -10,9 +10,17 @@ import {
   formatContext,
   formatGenerationStart,
   formatMessage,
+  formatModel,
 } from "./output.ts";
 import { checked, CommandError, run } from "./process.ts";
-import { BENCHMARK_MODELS, firstSubject, makePrompt, MODELS } from "./prompt.ts";
+import {
+  BENCHMARK_MODELS,
+  firstSubject,
+  INSTRUCTIONS,
+  makePrompt,
+  MODELS,
+  THINKING_LEVEL,
+} from "./prompt.ts";
 
 interface Options {
   signal?: AbortSignal;
@@ -35,10 +43,16 @@ async function generateSubject(
       "--session-dir",
       tempDir,
       "--no-tools",
+      "--no-extensions",
+      "--no-skills",
+      "--no-context-files",
+      "--no-prompt-templates",
+      "--system-prompt",
+      INSTRUCTIONS,
       "--model",
       model,
       "--thinking",
-      "minimal",
+      THINKING_LEVEL,
       `@${requestFile}`,
     ],
     { signal },
@@ -154,7 +168,7 @@ export async function main(
           } catch (error) {
             const seconds = (performance.now() - started) / 1000;
             console.error(
-              `${chalk.bold.cyan("Model")} ${chalk.bold.white(benchmarkModel)} ${chalk.dim(`(${seconds.toFixed(2)}s)`)}\n  ${chalk.red(error instanceof Error ? error.message : String(error))}\n`,
+              `${chalk.bold.cyan("Model")} ${formatModel(benchmarkModel)} ${chalk.dim(`(${seconds.toFixed(2)}s)`)}\n  ${chalk.red(error instanceof Error ? error.message : String(error))}\n`,
             );
             return 1;
           }

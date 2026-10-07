@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import wrapAnsi from "wrap-ansi";
 
-import { INSTRUCTIONS } from "./prompt.ts";
+import { INSTRUCTIONS, THINKING_LEVEL } from "./prompt.ts";
 
 interface Context {
   scope: string;
@@ -52,8 +52,12 @@ export function formatMessage(message: string, seconds?: number): string {
   return `${chalk.bold.cyan("Proposed commit message")}${suffix}\n  ${chalk.bold.green(message)}\n`;
 }
 
+export function formatModel(model: string): string {
+  return `${chalk.bold.white(model)} ${chalk.dim(`(thinking: ${THINKING_LEVEL})`)}`;
+}
+
 export function formatGenerationStart(model: string, stats?: InputStats): string {
-  return `${chalk.bold.cyan("Generating commit message with")} ${chalk.bold.white(model)}${formatInputSuffix(stats)}...`;
+  return `${chalk.bold.cyan("Generating commit message with")} ${formatModel(model)}${formatInputSuffix(stats)}...`;
 }
 
 export function formatBenchmarkStart(stats: InputStats): string {
@@ -61,7 +65,7 @@ export function formatBenchmarkStart(stats: InputStats): string {
 }
 
 export function formatBenchmarkResult(model: string, message: string, seconds: number): string {
-  return `${chalk.bold.cyan("Model")} ${chalk.bold.white(model)} ${chalk.dim(`(${seconds.toFixed(2)}s)`)}\n  ${chalk.bold.green(message)}\n`;
+  return `${chalk.bold.cyan("Model")} ${formatModel(model)} ${chalk.dim(`(${seconds.toFixed(2)}s)`)}\n  ${chalk.bold.green(message)}\n`;
 }
 
 export function formatReviewPrompt(): string {
