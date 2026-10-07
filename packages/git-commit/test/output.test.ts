@@ -3,7 +3,14 @@ import { stripVTControlCharacters } from "node:util";
 
 import assert from "node:assert/strict";
 
-import { formatContext, formatMessage, formatReviewPrompt } from "../src/output.ts";
+import {
+  formatBenchmarkResult,
+  formatBenchmarkStart,
+  formatContext,
+  formatGenerationStart,
+  formatMessage,
+  formatReviewPrompt,
+} from "../src/output.ts";
 import { INSTRUCTIONS } from "../src/prompt.ts";
 
 const context = {
@@ -34,33 +41,26 @@ test("an initial commit has an explicit empty history", () => {
   assert.doesNotMatch(output, /•/);
 });
 
-test("the first proposed message shows input size, diff lines, and fractional seconds", () => {
+test("the first proposed message shows only fractional seconds", () => {
   assert.equal(
-    stripVTControlCharacters(
-      formatMessage("Add CLI styling", { promptChars: 1234, diffLines: 42, seconds: 8.126 }),
-    ),
-    "Proposed commit message (1,234 chars, 42 LoC, 8.13s)\n  Add CLI styling\n",
+    stripVTControlCharacters(formatMessage("Add CLI styling", 8.126)),
+    "Proposed commit message (8.13s)\n  Add CLI styling\n",
   );
-  assert.match(
-    stripVTControlCharacters(
-      formatMessage("Add CLI styling", { promptChars: 1234, diffLines: 42, seconds: 0 }),
-    ),
-    /\(1,234 chars, 42 LoC, 0\.00s\)/,
-  );
+  assert.match(stripVTControlCharacters(formatMessage("Add CLI styling", 0)), /\(0\.00s\)/);
 });
 
 test("character and diff line counts group thousands and millions", () => {
   assert.equal(
     stripVTControlCharacters(
-      formatMessage("Add CLI styling", { promptChars: 1234567, diffLines: 12345, seconds: 8.12 }),
+      formatGenerationStart("provider/model", { promptChars: 1234567, diffLines: 12345 }),
     ),
-    "Proposed commit message (1,234,567 chars, 12,345 LoC, 8.12s)\n  Add CLI styling\n",
+    "Generating commit message with provider/model (1,234,567 chars, 12,345 LoC)...",
   );
   assert.match(
     stripVTControlCharacters(
-      formatMessage("Add CLI styling", { promptChars: 999, diffLines: 0, seconds: 0 }),
+      formatGenerationStart("provider/model", { promptChars: 999, diffLines: 0 }),
     ),
-    /\(999 chars, 0 LoC, 0\.00s\)/,
+    /\(999 chars, 0 LoC\)/,
   );
 });
 
@@ -68,6 +68,20 @@ test("subsequent proposed messages have no statistics suffix", () => {
   assert.equal(
     stripVTControlCharacters(formatMessage("Refine CLI styling")),
     "Proposed commit message\n  Refine CLI styling\n",
+  );
+});
+
+test("benchmark start shows the shared input size and diff line count", () => {
+  assert.equal(
+    stripVTControlCharacters(formatBenchmarkStart({ promptChars: 1234567, diffLines: 12345 })),
+    "Generating commit messages (1,234,567 chars, 12,345 LoC)...",
+  );
+});
+
+test("benchmark results put only elapsed time on the model heading", () => {
+  assert.equal(
+    stripVTControlCharacters(formatBenchmarkResult("provider/model", "Add benchmark mode", 8.126)),
+    "Model provider/model (8.13s)\n  Add benchmark mode\n",
   );
 });
 

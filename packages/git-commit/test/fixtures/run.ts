@@ -5,9 +5,11 @@ import { CommandError } from "../../src/process.ts";
 
 const actions: Action[] = JSON.parse(process.env.TEST_ACTIONS || "[]");
 process.exitCode = await main(process.argv.slice(2), {
-  ask: async () => {
-    const action = actions.shift();
-    if (!action) throw new CommandError("stopped.", 130);
-    return action;
-  },
+  ask: process.env.TEST_DEFAULT_ASK
+    ? undefined
+    : async () => {
+        const action = actions.shift();
+        if (!action) throw new CommandError("stopped.", 130);
+        return action;
+      },
 });

@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 
 import type { Action } from "../src/input.ts";
 
-import { makePrompt, MODELS } from "../src/prompt.ts";
+import { formatBenchmarkStart, formatContext } from "../src/output.ts";
+import { BENCHMARK_MODELS, makePrompt, MODELS } from "../src/prompt.ts";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -103,7 +104,7 @@ test("the package executable and help use git-commit", (t) => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout,
-    "Usage: git-commit [-s]\n  -s  Select a listed or custom model with fzf\n",
+    "Usage: git-commit [-s | -b]\n  -s  Select a listed or custom model with fzf\n  -b  Benchmark selected models in parallel without committing\n",
   );
   assert.deepEqual(requests(), []);
 });
@@ -133,12 +134,20 @@ test("staged changes take priority and feedback continues the same conversation"
   assert.equal(calls.length, 3);
   const headings = stripVTControlCharacters(result.stdout).match(/^Proposed commit message.*$/gm)!;
   assert.equal(headings.length, 3);
+  assert.match(headings[0], /^Proposed commit message \(\d+\.\d{2}s\)$/);
+  const generationHeadings = stripVTControlCharacters(result.stdout).match(
+    /^Generating commit message with.*$/gm,
+  )!;
   assert.match(
-    headings[0],
+    generationHeadings[0],
     new RegExp(
-      `^Proposed commit message \\(${Array.from(calls[0].request).length.toLocaleString("en-US")} chars, ${diffLines.toLocaleString("en-US")} LoC, \\d+\\.\\d{2}s\\)$`,
+      ` \\(${Array.from(calls[0].request).length.toLocaleString("en-US")} chars, ${diffLines.toLocaleString("en-US")} LoC\\)\\.\\.\\.$`,
     ),
   );
+  assert.deepEqual(generationHeadings.slice(1), [
+    `Generating commit message with ${MODELS[0]}...`,
+    `Generating commit message with ${MODELS[0]}...`,
+  ]);
   assert.deepEqual(headings.slice(1), ["Proposed commit message", "Proposed commit message"]);
   assert.match(calls[0].request, /Initial test commit/);
   assert.match(calls[0].request, /\+new staged/);
@@ -240,7 +249,7 @@ test("Ctrl-G action uses VISUAL with quoted arguments, then reviews the edited s
   assert.match(result.stdout, /Edited subject/);
   const headings = stripVTControlCharacters(result.stdout).match(/^Proposed commit message.*$/gm)!;
   assert.equal(headings.length, 2);
-  assert.match(headings[0], /\([\d,]+ chars, [\d,]+ LoC, \d+\.\d{2}s\)$/);
+  assert.match(headings[0], /\(\d+\.\d{2}s\)$/);
   assert.equal(headings[1], "Proposed commit message");
   const editorArgs: string[] = JSON.parse(readFileSync(editorLog, "utf8").trim());
   assert.equal(editorArgs[0], "argument with spaces");
@@ -341,12 +350,169 @@ test("-s rejects cancellation, empty custom names, and fzf errors without callin
 
 test("reports invalid arguments and directories outside a Git work tree", (t) => {
   const { repo, invoke, requests } = setup(t);
-  const invalid = invoke([], [], {}, ["--invalid"]);
-  assert.equal(invalid.status, 2);
-  assert.match(invalid.stderr, /git-commit: Usage: git-commit \[-s\]/);
+  for (const args of [["--invalid"], ["-s", "-b"]]) {
+    const invalid = invoke([], [], {}, args);
+    assert.equal(invalid.status, 2);
+    assert.match(invalid.stderr, /git-commit: Usage: git-commit \[-s \| -b\]/);
+  }
   rmSync(join(repo, ".git"), { recursive: true });
   const result = invoke([]);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /git-commit: not inside a Git work tree/);
+  assert.deepEqual(requests(), []);
+});
+
+test("-b benchmarks the selected models in parallel without a terminal or committing", (t) => {
+  const { repo, git, invoke, requests } = setup(t);
+  writeFileSync(join(repo, "staged.txt"), "staged update\n");
+  git("add", "staged.txt");
+  writeFileSync(join(repo, "unstaged.txt"), "unstaged update\n");
+  const before = git("status", "--porcelain");
+  const expectedPrompt = makePrompt(
+    "Initial test commit",
+    `${git("diff", "--color=never", "--unified=1", "--cached")}\n`,
+  );
+  const outputs = Object.fromEntries(
+    BENCHMARK_MODELS.map((model) => [model, `Subject for ${model}`]),
+  );
+  const result = invoke(
+    [],
+    [],
+    {
+      TEST_DEFAULT_ASK: "1",
+      TEST_PI_WAIT_FOR_CALLS: "4",
+      TEST_PI_MODEL_OUTPUTS: JSON.stringify(outputs),
+      NO_COLOR: "1",
+      FORCE_COLOR: undefined,
+    },
+    ["-b"],
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const calls = requests();
+  assert.equal(calls.length, 4);
+  assert.deepEqual(
+    calls.map((call) => call.args[call.args.indexOf("--model") + 1]).sort(),
+    [...BENCHMARK_MODELS].sort(),
+  );
+  assert.equal(new Set(calls.map((call) => call.session)).size, 4);
+  for (const call of calls) {
+    assert.equal(call.request, expectedPrompt);
+    assert.deepEqual(call.history, []);
+    assert.ok(call.args.includes("--no-tools"));
+    assert.equal(existsSync(dirname(call.session)), false);
+  }
+  const expectedContext = formatContext({
+    scope: "staged changes",
+    files: git("diff", "--color=never", "--cached", "--name-status"),
+    subjects: "Initial test commit",
+    diff: `${git("diff", "--color=never", "--unified=1", "--cached")}\n`,
+  });
+  const plainOutput = stripVTControlCharacters(result.stdout);
+  const expectedStart = formatBenchmarkStart({
+    promptChars: Array.from(expectedPrompt).length,
+    diffLines: git("diff", "--color=never", "--unified=1", "--cached").split("\n").length,
+  });
+  assert.ok(
+    plainOutput.startsWith(
+      `\n${stripVTControlCharacters(expectedContext)}\n\n${stripVTControlCharacters(expectedStart)}\n\nModel `,
+    ),
+  );
+  const lines = plainOutput
+    .slice(plainOutput.indexOf("\nModel ") + 1)
+    .trim()
+    .split(/\n\n/);
+  assert.equal(lines.length, 4);
+  for (const block of lines) {
+    const match = block.match(/^Model (\S+) \(\d+\.\d{2}s\)\n  (.+)$/)!;
+    assert.ok(match, block);
+    assert.equal(match[2], outputs[match[1]]);
+  }
+  assert.equal(git("log", "-1", "--format=%s"), "Initial test commit");
+  assert.equal(git("status", "--porcelain"), before);
+});
+
+test("-b lets other models finish when one fails or returns an empty subject", (t) => {
+  const failedModel = BENCHMARK_MODELS[1];
+  for (const env of [
+    { TEST_PI_FAIL_MODEL: failedModel },
+    { TEST_PI_MODEL_OUTPUTS: JSON.stringify({ [failedModel]: "\n \n" }) },
+  ]) {
+    const { repo, git, invoke, requests } = setup(t);
+    writeFileSync(join(repo, "staged.txt"), "tracked update\n");
+    const result = invoke(
+      [],
+      ["Successful subject"],
+      {
+        ...env,
+        TEST_PI_WAIT_FOR_CALLS: "4",
+      },
+      ["-b"],
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(result.stderr.includes(failedModel));
+    assert.equal(result.stdout.match(/Successful subject/g)?.length, 3);
+    const calls = requests();
+    assert.equal(calls.length, 4);
+    for (const call of calls) {
+      assert.match(call.request, /\+tracked update/);
+      assert.equal(existsSync(dirname(call.session)), false);
+    }
+    assert.equal(git("log", "-1", "--format=%s"), "Initial test commit");
+    assert.equal(git("status", "--porcelain"), " M staged.txt");
+  }
+});
+
+test("-b styles context and results consistently and respects NO_COLOR", (t) => {
+  for (const color of [true, false]) {
+    const { repo, git, invoke, requests } = setup(t);
+    git("config", "color.ui", "always");
+    writeFileSync(join(repo, "staged.txt"), "benchmark update\n");
+    const result = invoke(
+      [],
+      ["Add benchmark styling"],
+      {
+        TEST_DEFAULT_ASK: "1",
+        FORCE_COLOR: color ? "1" : undefined,
+        NO_COLOR: color ? undefined : "1",
+      },
+      ["-b"],
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const plainOutput = stripVTControlCharacters(result.stdout);
+    assert.match(plainOutput, /Prompt\nGenerate a Git commit message/);
+    assert.match(plainOutput, /Recent commits \(style context\)\n  • Initial test commit/);
+    assert.match(plainOutput, /Git diff\ndiff --git/);
+    assert.match(plainOutput, /@@ -1 \+1 @@\n-original staged\n\+benchmark update/);
+    assert.equal(plainOutput.match(/^Model /gm)?.length, 4);
+    assert.doesNotMatch(plainOutput, /Proposed commit message/);
+    if (color) {
+      assert.ok(
+        result.stdout.includes("\u001b[1m\u001b[36mGenerating commit messages\u001b[39m\u001b[22m"),
+      );
+      assert.ok(result.stdout.includes("\u001b[1m\u001b[36mModel\u001b[39m\u001b[22m"));
+      assert.ok(
+        result.stdout.includes(`\u001b[1m\u001b[37m${BENCHMARK_MODELS[0]}\u001b[39m\u001b[22m`),
+      );
+      assert.match(result.stdout, /\u001b\[2m\([\d,]+ chars, [\d,]+ LoC\)\u001b\[22m/);
+      assert.match(result.stdout, /\u001b\[2m\(\d+\.\d{2}s\)\u001b\[22m/);
+      assert.ok(
+        result.stdout.includes("\u001b[1m\u001b[32mAdd benchmark styling\u001b[39m\u001b[22m"),
+      );
+      const diffLine = result.stdout
+        .split("\n")
+        .find((line) => stripVTControlCharacters(line) === "+benchmark update")!;
+      assert.match(diffLine, /\u001b\[/);
+    } else {
+      assert.doesNotMatch(result.stdout, /\u001b\[/);
+    }
+    for (const call of requests()) assert.doesNotMatch(call.request, /\u001b\[/);
+  }
+});
+
+test("-b with no changes returns without calling Pi", (t) => {
+  const { invoke, requests } = setup(t);
+  const result = invoke([], [], { TEST_DEFAULT_ASK: "1" }, ["-b"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /no tracked unstaged changes/);
   assert.deepEqual(requests(), []);
 });

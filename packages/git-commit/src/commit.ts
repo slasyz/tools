@@ -4,13 +4,50 @@ import chalk from "chalk";
 import { readFile, rm, writeFile } from "node:fs/promises";
 
 import { askForAction, type Action } from "./input.ts";
-import { formatContext, formatMessage } from "./output.ts";
+import {
+  formatBenchmarkResult,
+  formatBenchmarkStart,
+  formatContext,
+  formatGenerationStart,
+  formatMessage,
+} from "./output.ts";
 import { checked, CommandError, run } from "./process.ts";
-import { firstSubject, makePrompt, MODELS } from "./prompt.ts";
+import { BENCHMARK_MODELS, firstSubject, makePrompt, MODELS } from "./prompt.ts";
 
 interface Options {
   signal?: AbortSignal;
   ask?: (signal?: AbortSignal) => Promise<Action>;
+}
+
+async function generateSubject(
+  model: string,
+  requestFile: string,
+  sessionFile: string,
+  tempDir: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const result = await run(
+    "pi",
+    [
+      "--print",
+      "--session",
+      sessionFile,
+      "--session-dir",
+      tempDir,
+      "--no-tools",
+      "--model",
+      model,
+      "--thinking",
+      "minimal",
+      `@${requestFile}`,
+    ],
+    { signal },
+  );
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.code !== 0) throw new CommandError("pi could not generate a commit message.");
+  const message = firstSubject(result.stdout);
+  if (!message) throw new CommandError("pi returned an empty commit message.");
+  return message;
 }
 
 export async function main(
@@ -19,13 +56,17 @@ export async function main(
 ): Promise<number> {
   let tempDir: string | undefined;
   try {
+    const usage = "Usage: git-commit [-s | -b]";
     if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
-      console.log("Usage: git-commit [-s]\n  -s  Select a listed or custom model with fzf");
+      console.log(
+        `${usage}\n  -s  Select a listed or custom model with fzf\n  -b  Benchmark selected models in parallel without committing`,
+      );
       return 0;
     }
-    if (args.length > 1 || (args.length === 1 && args[0] !== "-s")) {
-      throw new CommandError("Usage: git-commit [-s]", 2);
+    if (args.length > 1 || (args.length === 1 && args[0] !== "-s" && args[0] !== "-b")) {
+      throw new CommandError(usage, 2);
     }
+    const benchmark = args[0] === "-b";
 
     let model: string = MODELS[0];
     if (args[0] === "-s") {
@@ -70,16 +111,20 @@ export async function main(
       return 0;
     }
 
-    if (ask === askForAction && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+    if (!benchmark && ask === askForAction && (!process.stdin.isTTY || !process.stdout.isTTY)) {
       throw new CommandError("an interactive terminal is required to review the message.");
     }
 
-    const files = await git(["diff", "--color=never", ...diffArgs, "--name-status"]);
     const head = await run("git", ["rev-parse", "--verify", "HEAD"], { signal });
     const subjects =
       head.code === 0 ? await git(["log", "--color=never", "-n", "5", "--format=%s"]) : "";
     const diff = await git(["diff", "--color=never", "--unified=1", ...diffArgs]);
     const prompt = makePrompt(subjects, diff);
+    const inputStats = {
+      promptChars: Array.from(prompt).length,
+      diffLines: diff ? diff.replace(/\r?\n$/, "").split(/\r?\n/).length : 0,
+    };
+    const files = await git(["diff", "--color=never", ...diffArgs, "--name-status"]);
     const displayDiff =
       chalk.level > 0 ? await git(["diff", "--color=always", "--unified=1", ...diffArgs]) : diff;
     console.log(`\n${formatContext({ scope, files, subjects, diff: displayDiff })}`);
@@ -88,52 +133,56 @@ export async function main(
       await checked("mktemp", ["-d", "-p", "/tmp", "git-commit.XXXXXX"], { signal })
     ).trim();
     const requestFile = join(tempDir, "request.txt");
+    if (benchmark) {
+      await writeFile(requestFile, prompt, { mode: 0o600 });
+      console.log(`\n${formatBenchmarkStart(inputStats)}\n`);
+      // Wait for every call, including failures, before removing the shared request file.
+      const results = await Promise.all(
+        BENCHMARK_MODELS.map(async (benchmarkModel, index) => {
+          const started = performance.now();
+          try {
+            const subject = await generateSubject(
+              benchmarkModel,
+              requestFile,
+              join(tempDir!, `session-${index}.jsonl`),
+              tempDir!,
+              signal,
+            );
+            const seconds = (performance.now() - started) / 1000;
+            console.log(formatBenchmarkResult(benchmarkModel, subject, seconds));
+            return 0;
+          } catch (error) {
+            const seconds = (performance.now() - started) / 1000;
+            console.error(
+              `${chalk.bold.cyan("Model")} ${chalk.bold.white(benchmarkModel)} ${chalk.dim(`(${seconds.toFixed(2)}s)`)}\n  ${chalk.red(error instanceof Error ? error.message : String(error))}\n`,
+            );
+            return 1;
+          }
+        }),
+      );
+      signal?.throwIfAborted();
+      return results.some((code) => code !== 0) ? 1 : 0;
+    }
     const sessionFile = join(tempDir, "session.jsonl");
     const messageFile = join(tempDir, "message.txt");
     const editor = process.env.VISUAL || process.env.EDITOR || "vi";
     let message = "";
     let generatedSubject = "";
 
-    async function generate(userMessage: string) {
+    async function generate(userMessage: string, showInputStats = false) {
       await writeFile(requestFile, userMessage, { mode: 0o600 });
-      console.log(
-        `\n${chalk.bold.cyan("Generating commit message with")} ${chalk.bold.white(model)}...\n`,
-      );
+      console.log(`\n${formatGenerationStart(model, showInputStats ? inputStats : undefined)}\n`);
       const started = performance.now();
       // Reopen only this temporary session so feedback follows prior user/assistant turns.
-      const result = await run(
-        "pi",
-        [
-          "--print",
-          "--session",
-          sessionFile,
-          "--session-dir",
-          tempDir!,
-          "--no-tools",
-          "--model",
-          model,
-          "--thinking",
-          "minimal",
-          `@${requestFile}`,
-        ],
-        { signal },
-      );
-      if (result.stderr) process.stderr.write(result.stderr);
-      if (result.code !== 0) throw new CommandError("pi could not generate a commit message.");
-      message = firstSubject(result.stdout);
-      if (!message) throw new CommandError("pi returned an empty commit message.");
+      message = await generateSubject(model, requestFile, sessionFile, tempDir!, signal);
       generatedSubject = message;
       return (performance.now() - started) / 1000;
     }
 
-    const stats = {
-      promptChars: Array.from(prompt).length,
-      diffLines: diff ? diff.replace(/\r?\n$/, "").split(/\r?\n/).length : 0,
-      seconds: await generate(prompt),
-    };
+    const seconds = await generate(prompt, true);
     let firstSuggestion = true;
     while (true) {
-      console.log(formatMessage(message, firstSuggestion ? stats : undefined));
+      console.log(formatMessage(message, firstSuggestion ? seconds : undefined));
       firstSuggestion = false;
       const action = await ask(signal);
       if (action.type === "accept") {
