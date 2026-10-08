@@ -13,6 +13,7 @@ import {
   formatModel,
 } from "./output.ts";
 import { checked, CommandError, run } from "./process.ts";
+import { parseGeneration } from "./pi.ts";
 import {
   BENCHMARK_MODELS,
   firstSubject,
@@ -33,11 +34,13 @@ async function generateSubject(
   sessionFile: string,
   tempDir: string,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<{ subject: string; cost?: number }> {
   const result = await run(
     "pi",
     [
       "--print",
+      "--mode",
+      "json",
       "--session",
       sessionFile,
       "--session-dir",
@@ -59,9 +62,7 @@ async function generateSubject(
   );
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.code !== 0) throw new CommandError("pi could not generate a commit message.");
-  const message = firstSubject(result.stdout);
-  if (!message) throw new CommandError("pi returned an empty commit message.");
-  return message;
+  return parseGeneration(result.stdout);
 }
 
 export async function main(
@@ -73,7 +74,7 @@ export async function main(
     const usage = "Usage: git-commit [-s | -b]";
     if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
       console.log(
-        `${usage}\n  -s  Select a listed or custom model with fzf\n  -b  Benchmark selected models in parallel without committing`,
+        `${usage}\n  -s  Select a listed or custom model with fzf\n  -b  Benchmark models in parallel, then select a message to review and commit`,
       );
       return 0;
     }
@@ -125,7 +126,8 @@ export async function main(
       return 0;
     }
 
-    if (!benchmark && ask === askForAction && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+    const interactive = ask !== askForAction || !!(process.stdin.isTTY && process.stdout.isTTY);
+    if (!benchmark && !interactive) {
       throw new CommandError("an interactive terminal is required to review the message.");
     }
 
@@ -147,6 +149,10 @@ export async function main(
       await checked("mktemp", ["-d", "-p", "/tmp", "git-commit.XXXXXX"], { signal })
     ).trim();
     const requestFile = join(tempDir, "request.txt");
+    let sessionFile = join(tempDir, "session.jsonl");
+    let message = "";
+    let generatedSubject = "";
+    let stats: { seconds: number; cost?: number } | undefined;
     if (benchmark) {
       await writeFile(requestFile, prompt, { mode: 0o600 });
       console.log(`\n${formatBenchmarkStart(inputStats)}\n`);
@@ -154,50 +160,74 @@ export async function main(
       const results = await Promise.all(
         BENCHMARK_MODELS.map(async (benchmarkModel, index) => {
           const started = performance.now();
+          const benchmarkSession = join(tempDir!, `session-${index}.jsonl`);
           try {
-            const subject = await generateSubject(
+            const { subject, cost } = await generateSubject(
               benchmarkModel,
               requestFile,
-              join(tempDir!, `session-${index}.jsonl`),
+              benchmarkSession,
               tempDir!,
               signal,
             );
             const seconds = (performance.now() - started) / 1000;
-            console.log(formatBenchmarkResult(benchmarkModel, subject, seconds));
-            return 0;
+            console.log(formatBenchmarkResult(benchmarkModel, subject, seconds, cost));
+            return { model: benchmarkModel, sessionFile: benchmarkSession, subject, seconds, cost };
           } catch (error) {
             const seconds = (performance.now() - started) / 1000;
             console.error(
               `${chalk.bold.cyan("Model")} ${formatModel(benchmarkModel)} ${chalk.dim(`(${seconds.toFixed(2)}s)`)}\n  ${chalk.red(error instanceof Error ? error.message : String(error))}\n`,
             );
-            return 1;
+            return undefined;
           }
         }),
       );
       signal?.throwIfAborted();
-      return results.some((code) => code !== 0) ? 1 : 0;
+      const candidates = results.filter((result) => result !== undefined);
+      if (!interactive || candidates.length === 0) {
+        return candidates.length !== results.length ? 1 : 0;
+      }
+      const choices = candidates.map((candidate) => `${candidate.subject}  (${candidate.model})`);
+      console.log(chalk.bold.cyan("Choose a message to review and commit."));
+      const selection = await run(
+        "fzf",
+        [
+          "--height=14",
+          "--border",
+          "--no-sort",
+          "--layout=reverse",
+          "--prompt=Message: ",
+          "--header=Enter: review selected message · Esc: cancel",
+        ],
+        { signal, input: `${choices.join("\n")}\n` },
+      );
+      const selected = candidates[choices.indexOf(selection.stdout.trim())];
+      if (selection.code !== 0 || !selected) {
+        throw new CommandError("message selection cancelled.", 130);
+      }
+      model = selected.model;
+      sessionFile = selected.sessionFile;
+      message = selected.subject;
+      generatedSubject = message;
+      stats = { seconds: selected.seconds, cost: selected.cost };
     }
-    const sessionFile = join(tempDir, "session.jsonl");
     const messageFile = join(tempDir, "message.txt");
     const editor = process.env.VISUAL || process.env.EDITOR || "vi";
-    let message = "";
-    let generatedSubject = "";
 
     async function generate(userMessage: string, showInputStats = false) {
       await writeFile(requestFile, userMessage, { mode: 0o600 });
       console.log(`\n${formatGenerationStart(model, showInputStats ? inputStats : undefined)}\n`);
       const started = performance.now();
       // Reopen only this temporary session so feedback follows prior user/assistant turns.
-      message = await generateSubject(model, requestFile, sessionFile, tempDir!, signal);
+      const result = await generateSubject(model, requestFile, sessionFile, tempDir!, signal);
+      message = result.subject;
       generatedSubject = message;
-      return (performance.now() - started) / 1000;
+      return { seconds: (performance.now() - started) / 1000, cost: result.cost };
     }
 
-    const seconds = await generate(prompt, true);
-    let firstSuggestion = true;
+    if (!benchmark) stats = await generate(prompt, true);
     while (true) {
-      console.log(formatMessage(message, firstSuggestion ? seconds : undefined));
-      firstSuggestion = false;
+      console.log(formatMessage(message, stats?.seconds, stats?.cost));
+      stats = undefined;
       const action = await ask(signal);
       if (action.type === "accept") {
         return (
@@ -209,7 +239,7 @@ export async function main(
           message === generatedSubject
             ? action.text
             : `Current commit subject after editing:\n${message}\n\n${action.text}`;
-        await generate(feedback);
+        stats = await generate(feedback);
         continue;
       }
 

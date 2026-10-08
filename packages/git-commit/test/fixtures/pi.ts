@@ -26,4 +26,14 @@ const modelOutputs: Record<string, string> = JSON.parse(process.env.TEST_PI_MODE
 const text = modelOutputs[model] ?? outputs[history.length / 2] ?? outputs.at(-1)!;
 history.push({ role: "user", text: request }, { role: "assistant", text });
 writeFileSync(session, JSON.stringify(history));
-console.log(text);
+const costs: unknown[] = JSON.parse(process.env.TEST_PI_COSTS || "[]");
+const cost = costs[history.length / 2 - 1];
+const message = {
+  role: "assistant",
+  content: [{ type: "thinking", thinking: "Not a commit subject" }, { type: "text", text }],
+  stopReason: "stop",
+  usage: cost === undefined ? undefined : { cost: { total: cost } },
+};
+console.log(JSON.stringify({ type: "message_end", message }));
+console.log(JSON.stringify({ type: "turn_end", message }));
+console.log(JSON.stringify({ type: "agent_end", messages: [message] }));

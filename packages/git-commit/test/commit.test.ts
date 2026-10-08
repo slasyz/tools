@@ -27,6 +27,7 @@ function assertIsolatedGeneration(args: string[]) {
     assert.ok(args.includes(flag), `Missing ${flag}`);
   }
   assert.ok(args.includes("--system-prompt"));
+  assert.equal(args[args.indexOf("--mode") + 1], "json");
   assert.equal(args[args.indexOf("--system-prompt") + 1], INSTRUCTIONS);
   assert.ok(args.includes("--thinking"));
   assert.equal(args[args.indexOf("--thinking") + 1], "minimal");
@@ -120,7 +121,7 @@ test("the package executable and help use git-commit", (t) => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(
     result.stdout,
-    "Usage: git-commit [-s | -b]\n  -s  Select a listed or custom model with fzf\n  -b  Benchmark selected models in parallel without committing\n",
+    "Usage: git-commit [-s | -b]\n  -s  Select a listed or custom model with fzf\n  -b  Benchmark models in parallel, then select a message to review and commit\n",
   );
   assert.deepEqual(requests(), []);
 });
@@ -160,12 +161,14 @@ test("staged changes take priority and feedback continues the same conversation"
       ` \\(${Array.from(calls[0].request).length.toLocaleString("en-US")} chars, ${diffLines.toLocaleString("en-US")} LoC\\)\\.\\.\\.$`,
     ),
   );
-  assert.ok(generationHeadings[0].includes(`${MODELS[0]} (thinking: minimal)`));
+  assert.ok(generationHeadings[0].includes(`${MODELS[0]}:minimal`));
   assert.deepEqual(generationHeadings.slice(1), [
-    `Generating commit message with ${MODELS[0]} (thinking: minimal)...`,
-    `Generating commit message with ${MODELS[0]} (thinking: minimal)...`,
+    `Generating commit message with ${MODELS[0]}:minimal...`,
+    `Generating commit message with ${MODELS[0]}:minimal...`,
   ]);
-  assert.deepEqual(headings.slice(1), ["Proposed commit message", "Proposed commit message"]);
+  for (const heading of headings.slice(1)) {
+    assert.match(heading, /^Proposed commit message \(\d+\.\d{2}s\)$/);
+  }
   assert.match(calls[0].request, /Initial test commit/);
   assert.match(calls[0].request, /\+new staged/);
   assert.doesNotMatch(calls[0].request, /new unstaged/);
@@ -187,6 +190,37 @@ test("without staged changes, commits all tracked changes but not untracked file
   assert.equal(result.status, 0, result.stderr);
   assert.equal(git("show", "--format=", "--name-only", "HEAD"), "staged.txt\nunstaged.txt");
   assert.equal(git("status", "--porcelain"), "?? untracked.txt");
+});
+
+test("generation and feedback show separate request costs while edits do not repeat them", (t) => {
+  const { repo, invoke, git } = setup(t);
+  writeFileSync(join(repo, "staged.txt"), "update\n");
+  const result = invoke(
+    [{ type: "edit" }, { type: "feedback", text: "Shorter" }, { type: "accept" }],
+    ["First subject", "Final subject"],
+    { TEST_PI_COSTS: "[0.012345,0]", TEST_EDITOR_MESSAGE: "Edited subject\n" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const headings = stripVTControlCharacters(result.stdout).match(/^Proposed commit message.*$/gm)!;
+  assert.match(headings[0], /\(\d+\.\d{2}s, \$0\.0123\)$/);
+  assert.equal(headings[1], "Proposed commit message");
+  assert.match(headings[2], /\(\d+\.\d{2}s, \$0\.0000\)$/);
+  assert.equal(git("log", "-1", "--format=%s"), "Final subject");
+});
+
+test("benchmark results show request costs when Pi reports them", (t) => {
+  const { repo, invoke } = setup(t);
+  writeFileSync(join(repo, "staged.txt"), "update\n");
+  const result = invoke(
+    [],
+    ["Subject"],
+    { TEST_PI_COSTS: "[0.123456]", TEST_DEFAULT_ASK: "1" },
+    ["-b"],
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const headings = stripVTControlCharacters(result.stdout).match(/^Model .*$/gm)!;
+  assert.equal(headings.length, BENCHMARK_MODELS.length);
+  for (const heading of headings) assert.match(heading, /\(\d+\.\d{2}s, \$0\.1235\)$/);
 });
 
 test("colored output keeps the request plain and shows a full Git diff separately", (t) => {
@@ -398,7 +432,7 @@ test("-b benchmarks the selected models in parallel without a terminal or commit
     [],
     {
       TEST_DEFAULT_ASK: "1",
-      TEST_PI_WAIT_FOR_CALLS: "4",
+      TEST_PI_WAIT_FOR_CALLS: String(BENCHMARK_MODELS.length),
       TEST_PI_MODEL_OUTPUTS: JSON.stringify(outputs),
       NO_COLOR: "1",
       FORCE_COLOR: undefined,
@@ -407,12 +441,12 @@ test("-b benchmarks the selected models in parallel without a terminal or commit
   );
   assert.equal(result.status, 0, result.stderr);
   const calls = requests();
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, BENCHMARK_MODELS.length);
   assert.deepEqual(
     calls.map((call) => call.args[call.args.indexOf("--model") + 1]).sort(),
     [...BENCHMARK_MODELS].sort(),
   );
-  assert.equal(new Set(calls.map((call) => call.session)).size, 4);
+  assert.equal(new Set(calls.map((call) => call.session)).size, BENCHMARK_MODELS.length);
   for (const call of calls) {
     assert.equal(call.request, expectedPrompt);
     assert.deepEqual(call.history, []);
@@ -439,9 +473,9 @@ test("-b benchmarks the selected models in parallel without a terminal or commit
     .slice(plainOutput.indexOf("\nModel ") + 1)
     .trim()
     .split(/\n\n/);
-  assert.equal(lines.length, 4);
+  assert.equal(lines.length, BENCHMARK_MODELS.length);
   for (const block of lines) {
-    const match = block.match(/^Model (\S+) \(thinking: minimal\) \(\d+\.\d{2}s\)\n  (.+)$/)!;
+    const match = block.match(/^Model (\S+):minimal \(\d+\.\d{2}s\)\n  (.+)$/)!;
     assert.ok(match, block);
     assert.equal(match[2], outputs[match[1]]);
   }
@@ -462,18 +496,19 @@ test("-b lets other models finish when one fails or returns an empty subject", (
       ["Successful subject"],
       {
         ...env,
-        TEST_PI_WAIT_FOR_CALLS: "4",
+        TEST_DEFAULT_ASK: "1",
+        TEST_PI_WAIT_FOR_CALLS: String(BENCHMARK_MODELS.length),
       },
       ["-b"],
     );
     assert.equal(result.status, 1, result.stderr);
     assert.ok(result.stderr.includes(failedModel));
     assert.ok(
-      stripVTControlCharacters(result.stderr).includes(`Model ${failedModel} (thinking: minimal)`),
+      stripVTControlCharacters(result.stderr).includes(`Model ${failedModel}:minimal`),
     );
-    assert.equal(result.stdout.match(/Successful subject/g)?.length, 3);
+    assert.equal(result.stdout.match(/Successful subject/g)?.length, BENCHMARK_MODELS.length - 1);
     const calls = requests();
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, BENCHMARK_MODELS.length);
     for (const call of calls) {
       assert.match(call.request, /\+tracked update/);
       assert.equal(existsSync(dirname(call.session)), false);
@@ -504,7 +539,7 @@ test("-b styles context and results consistently and respects NO_COLOR", (t) => 
     assert.match(plainOutput, /Recent commits \(style context\)\n  • Initial test commit/);
     assert.match(plainOutput, /Git diff\ndiff --git/);
     assert.match(plainOutput, /@@ -1 \+1 @@\n-original staged\n\+benchmark update/);
-    assert.equal(plainOutput.match(/^Model /gm)?.length, 4);
+    assert.equal(plainOutput.match(/^Model /gm)?.length, BENCHMARK_MODELS.length);
     assert.doesNotMatch(plainOutput, /Proposed commit message/);
     if (color) {
       assert.ok(
@@ -514,6 +549,7 @@ test("-b styles context and results consistently and respects NO_COLOR", (t) => 
       assert.ok(
         result.stdout.includes(`\u001b[1m\u001b[37m${BENCHMARK_MODELS[0]}\u001b[39m\u001b[22m`),
       );
+      assert.ok(result.stdout.includes("\u001b[2m:minimal\u001b[22m"));
       assert.match(result.stdout, /\u001b\[2m\([\d,]+ chars, [\d,]+ LoC\)\u001b\[22m/);
       assert.match(result.stdout, /\u001b\[2m\(\d+\.\d{2}s\)\u001b\[22m/);
       assert.ok(
@@ -528,6 +564,127 @@ test("-b styles context and results consistently and respects NO_COLOR", (t) => 
     }
     for (const call of requests()) assert.doesNotMatch(call.request, /\u001b\[/);
   }
+});
+
+test("-b waits for every result, then reviews and commits the selected message", (t) => {
+  for (const staged of [true, false]) {
+    const { repo, git, invoke, requests } = setup(t);
+    writeFileSync(join(repo, "staged.txt"), "selected update\n");
+    if (staged) git("add", "staged.txt");
+    writeFileSync(join(repo, "unstaged.txt"), "other update\n");
+    writeFileSync(join(repo, "untracked.txt"), "leave alone\n");
+    const outputs = Object.fromEntries(
+      BENCHMARK_MODELS.map((model) => [model, `Subject for ${model}`]),
+    );
+    const selectedModel = BENCHMARK_MODELS[2];
+    const result = invoke(
+      [{ type: "accept" }],
+      [],
+      {
+        TEST_PI_MODEL_OUTPUTS: JSON.stringify(outputs),
+        TEST_PI_WAIT_FOR_CALLS: String(BENCHMARK_MODELS.length),
+        TEST_PI_COSTS: "[0.123456]",
+        TEST_FZF_INPUT: `${BENCHMARK_MODELS.map((model) => `${outputs[model]}  (${model})`).join("\n")}\n`,
+        TEST_FZF_OUTPUT: `${outputs[selectedModel]}  (${selectedModel})\n`,
+      },
+      ["-b"],
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(git("log", "-1", "--format=%s"), outputs[selectedModel]);
+    assert.equal(
+      git("show", "--format=", "--name-only", "HEAD"),
+      staged ? "staged.txt" : "staged.txt\nunstaged.txt",
+    );
+    assert.equal(
+      git("status", "--porcelain"),
+      staged ? " M unstaged.txt\n?? untracked.txt" : "?? untracked.txt",
+    );
+    const plain = stripVTControlCharacters(result.stdout);
+    assert.ok(plain.lastIndexOf("\nModel ") < plain.indexOf("Choose a message"));
+    assert.match(plain, /Proposed commit message \(\d+\.\d{2}s, \$0\.1235\)/);
+    assert.equal(requests().length, BENCHMARK_MODELS.length);
+    for (const call of requests()) assert.equal(existsSync(dirname(call.session)), false);
+  }
+});
+
+test("-b editing and feedback use the chosen model's existing session", (t) => {
+  const { repo, git, invoke, requests } = setup(t);
+  writeFileSync(join(repo, "staged.txt"), "update\n");
+  const selectedModel = BENCHMARK_MODELS[2];
+  const result = invoke(
+    [{ type: "edit" }, { type: "feedback", text: "Shorter" }, { type: "accept" }],
+    ["Same subject", "Refined subject"],
+    {
+      TEST_FZF_OUTPUT: `Same subject  (${selectedModel})\n`,
+      TEST_EDITOR_MESSAGE: "Edited subject\n",
+    },
+    ["-b"],
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(git("log", "-1", "--format=%s"), "Refined subject");
+  const calls = requests();
+  assert.equal(calls.length, BENCHMARK_MODELS.length + 1);
+  const initial = calls.find((call) => call.args[call.args.indexOf("--model") + 1] === selectedModel)!;
+  const feedback = calls.at(-1)!;
+  assert.equal(feedback.session, initial.session);
+  assert.equal(feedback.args[feedback.args.indexOf("--model") + 1], selectedModel);
+  assert.deepEqual(feedback.history, [
+    { role: "user", text: initial.request },
+    { role: "assistant", text: "Same subject" },
+  ]);
+  assert.equal(feedback.request, "Current commit subject after editing:\nEdited subject\n\nShorter");
+  const headings = stripVTControlCharacters(result.stdout).match(/^Proposed commit message.*$/gm)!;
+  assert.equal(headings[1], "Proposed commit message");
+  for (const call of calls) assert.equal(existsSync(dirname(call.session)), false);
+});
+
+test("-b can select a successful result even when another model fails", (t) => {
+  const { repo, git, invoke } = setup(t);
+  writeFileSync(join(repo, "staged.txt"), "update\n");
+  const failedModel = BENCHMARK_MODELS[1];
+  const selectedModel = BENCHMARK_MODELS[2];
+  const result = invoke(
+    [{ type: "accept" }],
+    ["Successful subject"],
+    {
+      TEST_PI_FAIL_MODEL: failedModel,
+      TEST_FZF_INPUT: `${BENCHMARK_MODELS.filter((model) => model !== failedModel).map((model) => `Successful subject  (${model})`).join("\n")}\n`,
+      TEST_FZF_OUTPUT: `Successful subject  (${selectedModel})\n`,
+    },
+    ["-b"],
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stderr.includes(failedModel));
+  assert.equal(git("log", "-1", "--format=%s"), "Successful subject");
+});
+
+test("-b cancellation or invalid selection never commits and cleans temporary files", (t) => {
+  for (const env of [
+    { TEST_FZF_OUTPUT: "", TEST_FZF_EXIT: "130" },
+    { TEST_FZF_OUTPUT: "\n" },
+    { TEST_FZF_OUTPUT: "Not a listed message\n" },
+    { TEST_FZF_OUTPUT: `Subject  (${BENCHMARK_MODELS[0]})\n`, TEST_FZF_EXIT: "2" },
+  ]) {
+    const { repo, git, invoke, requests } = setup(t);
+    writeFileSync(join(repo, "staged.txt"), "update\n");
+    const result = invoke([{ type: "accept" }], ["Subject"], env, ["-b"]);
+    assert.equal(result.status, 130, result.stderr);
+    assert.match(result.stderr, /message selection cancelled/);
+    assert.equal(git("log", "-1", "--format=%s"), "Initial test commit");
+    assert.equal(requests().length, BENCHMARK_MODELS.length);
+    for (const call of requests()) assert.equal(existsSync(dirname(call.session)), false);
+  }
+});
+
+test("-b skips selection when all models fail", (t) => {
+  const { repo, git, invoke, requests } = setup(t);
+  writeFileSync(join(repo, "staged.txt"), "update\n");
+  const result = invoke([{ type: "accept" }], [], { TEST_PI_FAIL: "1" }, ["-b"]);
+  assert.equal(result.status, 1, result.stderr);
+  assert.doesNotMatch(result.stdout, /Choose a message|Proposed commit message/);
+  assert.equal(git("log", "-1", "--format=%s"), "Initial test commit");
+  assert.equal(requests().length, BENCHMARK_MODELS.length);
+  for (const call of requests()) assert.equal(existsSync(dirname(call.session)), false);
 });
 
 test("-b with no changes returns without calling Pi", (t) => {

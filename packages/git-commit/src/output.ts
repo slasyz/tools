@@ -47,13 +47,20 @@ function formatInputSuffix(stats?: InputStats): string {
   return stats ? ` ${chalk.dim(`(${formatInputStats(stats)})`)}` : "";
 }
 
-export function formatMessage(message: string, seconds?: number): string {
-  const suffix = seconds === undefined ? "" : ` ${chalk.dim(`(${seconds.toFixed(2)}s)`)}`;
+function formatRequestStats(seconds?: number, cost?: number): string {
+  const parts = [];
+  if (seconds !== undefined) parts.push(`${seconds.toFixed(2)}s`);
+  if (cost !== undefined) parts.push(`$${cost.toFixed(4)}`);
+  return parts.length ? ` ${chalk.dim(`(${parts.join(", ")})`)}` : "";
+}
+
+export function formatMessage(message: string, seconds?: number, cost?: number): string {
+  const suffix = formatRequestStats(seconds, cost);
   return `${chalk.bold.cyan("Proposed commit message")}${suffix}\n  ${chalk.bold.green(message)}\n`;
 }
 
 export function formatModel(model: string): string {
-  return `${chalk.bold.white(model)} ${chalk.dim(`(thinking: ${THINKING_LEVEL})`)}`;
+  return `${chalk.bold.white(model)}${chalk.dim(`:${THINKING_LEVEL}`)}`;
 }
 
 export function formatGenerationStart(model: string, stats?: InputStats): string {
@@ -64,8 +71,13 @@ export function formatBenchmarkStart(stats: InputStats): string {
   return `${chalk.bold.cyan("Generating commit messages")}${formatInputSuffix(stats)}${chalk.bold.cyan("...")}`;
 }
 
-export function formatBenchmarkResult(model: string, message: string, seconds: number): string {
-  return `${chalk.bold.cyan("Model")} ${formatModel(model)} ${chalk.dim(`(${seconds.toFixed(2)}s)`)}\n  ${chalk.bold.green(message)}\n`;
+export function formatBenchmarkResult(
+  model: string,
+  message: string,
+  seconds: number,
+  cost?: number,
+): string {
+  return `${chalk.bold.cyan("Model")} ${formatModel(model)}${formatRequestStats(seconds, cost)}\n  ${chalk.bold.green(message)}\n`;
 }
 
 export function formatReviewPrompt(): string {

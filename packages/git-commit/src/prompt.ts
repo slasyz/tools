@@ -1,10 +1,13 @@
 export const THINKING_LEVEL = "minimal";
 
 export const MODELS = [
+  "opencode-go/claude-haiku-5-5",
   "opencode-go/gpt-6-luna",
-  "opencode/claude-haiku-5-5",
   "opencode-go/deepseek-v4.1-flash",
   "opencode-go/gpt-5.6-luna",
+  "opencode-go/glm-5.3-flash",
+  "opencode-go/qwen3.8-flash",
+  "opencode/gemini-3.8-flash",
   "openrouter/google/gemini-3.8-flash",
   "openrouter/inception/mercury-2",
   "opencode-go/kimi-k2.7-code",
@@ -17,10 +20,14 @@ export const MODELS = [
 ] as const;
 
 export const BENCHMARK_MODELS = [
+  "opencode-go/claude-haiku-5-5",
   "opencode-go/gpt-6-luna",
   "openai-codex/gpt-6-luna",
+  "opencode-go/qwen3.8-flash",
   "opencode-go/deepseek-v4.1-flash",
+  "opencode-go/glm-5.3-flash",
   "opencode-go/minimax-m3",
+  "opencode/gemini-3.8-flash",
 ] as const satisfies readonly (typeof MODELS)[number][];
 
 export const INSTRUCTIONS =

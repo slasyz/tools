@@ -41,7 +41,7 @@ test("an initial commit has an explicit empty history", () => {
   assert.doesNotMatch(output, /•/);
 });
 
-test("the first proposed message shows only fractional seconds", () => {
+test("proposed messages show fractional seconds when cost is unavailable", () => {
   assert.equal(
     stripVTControlCharacters(formatMessage("Add CLI styling", 8.126)),
     "Proposed commit message (8.13s)\n  Add CLI styling\n",
@@ -49,12 +49,23 @@ test("the first proposed message shows only fractional seconds", () => {
   assert.match(stripVTControlCharacters(formatMessage("Add CLI styling", 0)), /\(0\.00s\)/);
 });
 
+test("request statistics show estimated USD costs, including zero", () => {
+  assert.equal(
+    stripVTControlCharacters(formatMessage("Add cost reporting", 8.126, 0.012345)),
+    "Proposed commit message (8.13s, $0.0123)\n  Add cost reporting\n",
+  );
+  assert.equal(
+    stripVTControlCharacters(formatBenchmarkResult("provider/model", "Add cost reporting", 0, 0)),
+    "Model provider/model:minimal (0.00s, $0.0000)\n  Add cost reporting\n",
+  );
+});
+
 test("character and diff line counts group thousands and millions", () => {
   assert.equal(
     stripVTControlCharacters(
       formatGenerationStart("provider/model", { promptChars: 1234567, diffLines: 12345 }),
     ),
-    "Generating commit message with provider/model (thinking: minimal) (1,234,567 chars, 12,345 LoC)...",
+    "Generating commit message with provider/model:minimal (1,234,567 chars, 12,345 LoC)...",
   );
   assert.match(
     stripVTControlCharacters(
@@ -81,14 +92,14 @@ test("benchmark start shows the shared input size and diff line count", () => {
 test("generation without statistics still shows the thinking level", () => {
   assert.equal(
     stripVTControlCharacters(formatGenerationStart("provider/model")),
-    "Generating commit message with provider/model (thinking: minimal)...",
+    "Generating commit message with provider/model:minimal...",
   );
 });
 
 test("benchmark results show the thinking level and elapsed time on the model heading", () => {
   assert.equal(
     stripVTControlCharacters(formatBenchmarkResult("provider/model", "Add benchmark mode", 8.126)),
-    "Model provider/model (thinking: minimal) (8.13s)\n  Add benchmark mode\n",
+    "Model provider/model:minimal (8.13s)\n  Add benchmark mode\n",
   );
 });
 
