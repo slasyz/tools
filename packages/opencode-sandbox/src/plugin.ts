@@ -32,9 +32,9 @@ import { createWorkerExecutables, sandboxShell, ShellTickets, workerRoot } from 
 // tool-specific instructions to the model.
 const UNSANDBOXED_DESCRIPTION = [
   "Execute a shell command outside the sandbox after explicit user approval for this invocation. Uses OpenCode's standard shell output limits, timeouts, cancellation, and background jobs.",
-  "Use shell by default. Use bash_unsandboxed only when the user explicitly requests unsandboxed execution, shell fails due to a sandbox restriction, or clear evidence shows the command will hit one.",
-  "When shell fails because of sandbox filesystem, permission, or network restrictions, use bash_unsandboxed for the same command without first asking in chat; this tool requests explicit user approval. Before retrying, check whether the failed command made partial changes and whether repeating it is safe. Do not use bash_unsandboxed for unrelated commands or ordinary command errors.",
-  "Use bash_unsandboxed without a trial shell call when clear evidence shows the command will hit a sandbox filesystem, permission, or network restriction.",
+  "Use shell by default. Use shell_unsandboxed only when the user explicitly requests unsandboxed execution, shell fails due to a sandbox restriction, or clear evidence shows the command will hit one.",
+  "When shell fails because of sandbox filesystem, permission, or network restrictions, use shell_unsandboxed for the same command without first asking in chat; this tool requests explicit user approval. Before retrying, check whether the failed command made partial changes and whether repeating it is safe. Do not use shell_unsandboxed for unrelated commands or ordinary command errors.",
+  "Use shell_unsandboxed without a trial shell call when clear evidence shows the command will hit a sandbox filesystem, permission, or network restriction.",
 ].join("\n\n");
 
 export async function setupSandbox(ctx: Context) {
@@ -277,7 +277,7 @@ export async function setupSandbox(ctx: Context) {
       tool.execute = (input, context) => invoke(input, context, false);
     });
     editor.add({
-      name: "bash_unsandboxed",
+      name: "shell_unsandboxed",
       input: shell.input,
       output: shell.output,
       description: UNSANDBOXED_DESCRIPTION,
@@ -329,7 +329,7 @@ export async function setupSandbox(ctx: Context) {
     event.system.push({
       type: "text",
       text: enabled(event.sessionID)
-        ? "Sandbox enabled: shell processes have OS filesystem/network restrictions; file tools have approval checks. Blocked access requires user approval. Never blindly retry a failed shell command: check for partial changes and whether repeating it is safe. bash_unsandboxed requests explicit user approval for every invocation; use it for sandbox restrictions as described in that tool's instructions."
+        ? "Sandbox enabled: shell processes have OS filesystem/network restrictions; file tools have approval checks. Blocked access requires user approval. Never blindly retry a failed shell command: check for partial changes and whether repeating it is safe. shell_unsandboxed requests explicit user approval for every invocation; use it for sandbox restrictions as described in that tool's instructions."
         : "Sandbox disabled for this session. OpenCode's native permissions still apply.",
     });
   });

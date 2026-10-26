@@ -207,8 +207,9 @@ test("shell uses isolated policy snapshots and original commands", async () => {
 
 test("unsandboxed description includes tool-specific approval and retry guidance", async () => {
   const f = await fixture();
-  const description = f.tools.get("bash_unsandboxed")!.description;
+  const description = f.tools.get("shell_unsandboxed")!.description;
   expect(description).toContain("Use shell by default");
+  expect(description).toContain("Use shell_unsandboxed only when");
   expect(description).toContain("user explicitly requests unsandboxed execution");
   expect(description).toContain("same command without first asking in chat");
   expect(description).toContain("this tool requests explicit user approval");
@@ -217,13 +218,14 @@ test("unsandboxed description includes tool-specific approval and retry guidance
   expect(description).toContain("without a trial shell call");
   expect(f.instructions()).toContain("check for partial changes");
   expect(f.instructions()).toContain("approval for every invocation");
+  expect(f.instructions()).toContain("shell_unsandboxed requests explicit user approval");
   expect(f.instructions()).not.toContain("Never rerun a failed shell command automatically");
   f.cleanup();
 });
 
 test("unsandboxed tool requires fresh approval even when disabled", async () => {
   const f = await fixture();
-  const tool = f.tools.get("bash_unsandboxed")!;
+  const tool = f.tools.get("shell_unsandboxed")!;
   await expect(tool.execute({ command: "echo hi" }, f.context())).rejects.toThrow("denied");
   await f.poll();
   const pending = tool.execute({ command: "echo hi" }, f.context());

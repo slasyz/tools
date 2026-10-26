@@ -90,7 +90,7 @@ Dialogs offer **allow for this session**, **edit the rule**, **abort**, or
 and save to the shared Pi config. Edited rules must match the blocked target;
 invalid rules abort the operation without saving them.
 
-The `bash_unsandboxed` tool accepts the same arguments as OpenCode's `shell`
+The `shell_unsandboxed` tool accepts the same arguments as OpenCode's `shell`
 tool and requires fresh approval for **every invocation**, even in a disabled
 session. OpenCode's native permissions still apply to approved operations.
 Its tool description tells the model to prefer `shell`, request unsandboxed
