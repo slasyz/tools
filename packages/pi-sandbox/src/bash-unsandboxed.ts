@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Box, Container, SelectList, Spacer, Text, type SelectItem } from "@earendil-works/pi-tui";
 
+import { permissionDialog } from "./permission-status.ts";
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
 
 type ApprovalResult = "approved" | "rejected" | "cancelled" | "too-long";
@@ -45,7 +46,7 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
     return "cancelled";
   }
 
-  const choice = await ctx.ui.custom<"cancel" | "run">((tui, theme, _keybindings, done) => {
+  const choice = await permissionDialog<"cancel" | "run">(ctx, (tui, theme, _keybindings, done) => {
     const container = new Container();
     container.addChild(new DynamicBorder((text: string) => theme.fg("warning", text)));
     container.addChild(new Text(theme.fg("warning", theme.bold("⚠ Unsandboxed command")), 1, 0));

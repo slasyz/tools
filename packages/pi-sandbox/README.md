@@ -73,6 +73,9 @@ Prompts without a UI abort. In RPC mode, permission prompts use Pi's extension U
 protocol and time out after five minutes. The RPC client must handle
 `extension_ui_request` records and send matching `extension_ui_response` records;
 otherwise the request is denied when it times out. Write grants also grant reads.
+In terminal mode, permission prompts report `state=blocked:kind=permission` through
+[OSC 7501](https://www.superlogical.com/rex/docs/build/program-status), then
+`state=working` when the prompt closes, including rejection or cancellation.
 The `bash_unsandboxed` tool runs a command outside the sandbox only after explicit
 user approval. Without a UI for approval, it does not run the command.
 `denyWrite` always overrides `allowWrite`; it is never prompted. A grant that

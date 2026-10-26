@@ -8,6 +8,8 @@ import {
   type SessionAllowances,
 } from "sandbox";
 
+import { permissionDialog } from "./permission-status.ts";
+
 export type PermissionChoice = "abort" | "session" | "global";
 
 export interface PermissionPromptResult {
@@ -129,7 +131,7 @@ export async function showPermissionPrompt(
 
   if (ctx.mode !== "tui") return { action: "abort", value: originalValue };
 
-  const result = await ctx.ui.custom<PermissionPromptResult>((tui, theme, _kb, done) => {
+  const result = await permissionDialog<PermissionPromptResult>(ctx, (tui, theme, _kb, done) => {
     const input = new Input();
     let selectedIndex = 0;
     let pendingAction: PermissionChoice | null = null;
