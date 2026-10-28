@@ -10,10 +10,13 @@ import re
 import sys
 from dataclasses import dataclass, field
 from functools import cache
+from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
     from rich.console import Console
+
+    from wt.repo import MergeStatus
 
 
 @cache
@@ -55,33 +58,67 @@ class Row:
     # True if branch is a placeholder such as "(detached)".
     no_branch: bool = False
     tags: list[str] = field(default_factory=list)
+    merged: "MergeStatus" = "-"
+
+
+def display_path(path: str) -> str:
+    """Abbreviate only paths inside the current user's home directory."""
+    try:
+        return str(Path("~") / Path(path).relative_to(Path.home()))
+    except ValueError:
+        return path
 
 
 def worktree_table(rows: list[Row], file: TextIO | None = None) -> None:
     file = file or sys.stdout
     if not file.isatty():
-        name_width = max((len(row.name) for row in rows), default=0)
-        branch_width = max((len(row.branch) for row in rows), default=0)
+        table = []
         for row in rows:
-            path = " ".join([row.path, *(f"[{tag}]" for tag in row.tags)])
-            print(f"{row.name:<{name_width}}  {row.branch:<{branch_width}}  {path}", file=file)
+            path = " ".join([display_path(row.path), *(f"[{tag}]" for tag in row.tags)])
+            table.append([row.name, row.branch, row.merged, path])
+        widths = [max(len(cell) for cell in column) for column in zip(*table, strict=True)]
+        for *cells, path in table:
+            padded = [cell.ljust(width) for cell, width in zip(cells, widths, strict=False)]
+            print(*padded, path, sep="  ", file=file)
         return
 
     from rich.console import Console
-    from rich.table import Table
     from rich.text import Text
 
-    table = Table(box=None, pad_edge=False, header_style="bold dim")
-    table.add_column("NAME", style="bold", no_wrap=True)
-    table.add_column("BRANCH", style="cyan", no_wrap=True)
-    table.add_column("PATH", overflow="fold")
+    console = Console(file=file, soft_wrap=True)
+    headers = [Text(label, style="bold dim") for label in ("NAME", "BRANCH", "MERGED", "PATH")]
+    cells = [headers]
     for row in rows:
-        branch = Text(row.branch, style="italic magenta" if row.no_branch else "")
-        path = Text(row.path)
+        branch = Text(row.branch, style="italic magenta" if row.no_branch else "cyan")
+        path = Text(display_path(row.path))
         for tag in row.tags:
             path.append(f" [{tag}]", style="yellow")
-        table.add_row(row.name, branch, path)
-    Console(file=file).print(table)
+        merged = Text(row.merged, style="green" if row.merged in ("merged", "squashed") else "dim")
+        cells.append([Text(row.name, style="bold"), branch, merged, path])
+
+    widths = [max(cell.cell_len for cell in column) for column in zip(*cells, strict=True)]
+    # Columns that don't fit move below each row. NAME always stays, even if it alone is too wide.
+    inline, wrapped = [0], []
+    used_width = widths[0]
+    for index in range(1, len(widths)):
+        if used_width + 2 + widths[index] <= console.width:
+            inline.append(index)
+            used_width += 2 + widths[index]
+        else:
+            wrapped.append(index)
+    markers = ("", "⑂", "◇", "↳")
+    for row_index, row_cells in enumerate(cells):
+        if wrapped and row_index > 1:
+            console.print()
+        line = Text()
+        for index in inline[:-1]:
+            cell = row_cells[index]
+            line.append(cell).append(" " * (widths[index] - cell.cell_len + 2))
+        line.append(row_cells[inline[-1]])
+        console.print(line)
+        if row_index > 0:
+            for index in wrapped:
+                console.print(Text.assemble((f"  {markers[index]} ", "dim"), row_cells[index]))
 
 
 HELP_STYLES = [

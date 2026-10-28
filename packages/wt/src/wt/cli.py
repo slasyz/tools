@@ -10,6 +10,8 @@ from wt.output import done, esc
 from wt.repo import (
     Worktree,
     WtError,
+    branch_merge_status,
+    default_branch,
     find_managed,
     git,
     git_visible,
@@ -27,10 +29,11 @@ HELP = """\
 wt - manage git worktrees in one shared directory
 
 Worktrees live in $XDG_DATA_HOME/wt (default: ~/.local/share/wt). Set WT_ROOT
-to use another directory. Each worktree is named <project>-<branch>-<xxxxxx>:
+to use another directory. Each worktree is named <project>-<branch>:
 <project> is the main worktree's directory name, <branch> is the branch name
 with runs of other characters than letters, digits, '.' and '_' replaced by
-'-', and <xxxxxx> is a random suffix. Run wt inside a git repository.
+'-'. A random six-character suffix is added only if the name is taken by a
+filesystem entry or a registered worktree. Run wt inside a git repository.
 
 Usage: wt <command> [options] [arguments]
 
@@ -43,12 +46,15 @@ Create and remove:
                     HEAD.
       --base <ref>  With -b: start the new branch at <ref> instead of HEAD.
 
-  remove [-f] [-D] [<name>]
+  remove [-f] [-D] [<name> | --merged]
       Remove worktree <name>. Without <name>, remove the worktree you are in.
       <name>               Worktree to remove.
+      --merged             Remove every worktree that ls shows as merged or
+                           squashed, except one on the default branch. A branch
+                           with no new commits counts as merged.
       -f, --force          Remove even if it has local changes.
       -D, --delete-branch  Also delete its branch. The branch must be merged,
-                           unless -f is given.
+                           unless -f or --merged is given.
 
   prune
       Drop records of worktrees whose directories are gone. Print directories
@@ -57,8 +63,10 @@ Create and remove:
 
 Find and switch:
   ls
-      List this project's worktrees: name, branch and path. Stale entries
-      (directory gone) are marked [prunable].
+      List this project's worktrees: name, branch, merged status and path.
+      MERGED is merged/squashed/no against the default branch, or - if unknown.
+      Paths under your home directory use ~. Stale entries (directory gone)
+      are marked [prunable].
 
   dir [<name>]
       Print the path of worktree <name>. Without <name>, print the path of
@@ -118,6 +126,7 @@ def build_parser() -> Parser:
     remove = add_command("remove", cmd_remove)
     remove.add_argument("-f", "--force", action="store_true")
     remove.add_argument("-D", "--delete-branch", action="store_true")
+    remove.add_argument("--merged", action="store_true")
     remove.add_argument("name", nargs="?")
 
     add_command("prune", cmd_prune)
@@ -140,7 +149,7 @@ def cmd_add(args: argparse.Namespace) -> None:
         raise WtError(f"branch '{args.branch}' does not exist (use -b to create it)")
 
     worktrees = list_worktrees()
-    path = new_worktree_path(project_name(worktrees[0]), args.branch)
+    path = new_worktree_path(project_name(worktrees[0]), args.branch, worktrees)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Run in the current directory, so HEAD is the HEAD of the worktree we're in.
     if args.new_branch:
@@ -154,9 +163,18 @@ def cmd_add(args: argparse.Namespace) -> None:
 
 
 def cmd_ls(args: argparse.Namespace) -> None:
+    worktrees = managed_worktrees(list_worktrees())
+    if not worktrees:
+        return
+    statuses = branch_merge_status([w.branch for w in worktrees if w.branch])
     rows = []
-    for worktree in managed_worktrees(list_worktrees()):
-        row = output.Row(worktree.name, worktree.branch or "", worktree.path)
+    for worktree in worktrees:
+        row = output.Row(
+            worktree.name,
+            worktree.branch or "",
+            worktree.path,
+            merged=statuses.get(worktree.branch or "", "-"),
+        )
         if not worktree.branch:
             row.branch = "(bare)" if worktree.bare else "(detached)"
             row.no_branch = True
@@ -165,8 +183,7 @@ def cmd_ls(args: argparse.Namespace) -> None:
         if worktree.locked:
             row.tags.append("locked")
         rows.append(row)
-    if rows:
-        output.worktree_table(rows)
+    output.worktree_table(rows)
 
 
 def cmd_dir(args: argparse.Namespace) -> None:
@@ -190,27 +207,76 @@ def current_managed_worktree(worktrees: list[Worktree]) -> Worktree:
     raise WtError("not inside a wt worktree; pass a worktree name")
 
 
-def cmd_remove(args: argparse.Namespace) -> None:
-    worktrees = list_worktrees()
-    main = worktrees[0].path
-    target = find_managed(args.name) if args.name else current_managed_worktree(worktrees)
-
+def remove_worktree(target: Worktree, main: str, force: bool, check: bool = True) -> bool:
+    """Remove target, running git from the main worktree so this works from inside target too."""
     if not os.path.isdir(target.path):
         output.warn(f"{target.path} is already gone; pruning its record")
         git_visible("-C", main, "worktree", "prune")
     else:
-        force = ["--force"] if args.force else []
-        # Run from the main worktree, so this works from inside the target too.
-        git_visible("-C", main, "worktree", "remove", *force, target.path)
+        force_args = ["--force"] if force else []
+        if not git_visible("-C", main, "worktree", "remove", *force_args, target.path, check=check):
+            return False
     done(f"Removed [bold]{esc(target.name)}[/]")
+    return True
 
+
+def delete_branch(branch: str, main: str, force: bool, check: bool = True) -> bool:
+    delete = "-D" if force else "-d"
+    if not git_visible("-C", main, "branch", "--quiet", delete, branch, check=check):
+        return False
+    done(f"Deleted branch [cyan]{esc(branch)}[/]")
+    return True
+
+
+def cmd_remove(args: argparse.Namespace) -> None:
+    if args.merged:
+        if args.name:
+            raise WtError("--merged takes no <name>")
+        remove_merged(args)
+        return
+
+    worktrees = list_worktrees()
+    main = worktrees[0].path
+    target = find_managed(args.name) if args.name else current_managed_worktree(worktrees)
+    remove_worktree(target, main, args.force)
     if args.delete_branch:
         if target.branch is None:
             output.warn("worktree had no branch; nothing to delete")
         else:
-            delete = "-D" if args.force else "-d"
-            git_visible("-C", main, "branch", "--quiet", delete, target.branch)
-            done(f"Deleted branch [cyan]{esc(target.branch)}[/]")
+            delete_branch(target.branch, main, args.force)
+
+
+def remove_merged(args: argparse.Namespace) -> None:
+    """Remove worktrees whose branches `wt ls` shows as merged or squashed.
+
+    Keep going after a failure, and report all failures at the end.
+    """
+    worktrees = list_worktrees()
+    main = worktrees[0].path
+    default = default_branch()
+    if default is None:
+        raise WtError("could not find the default branch, so nothing counts as merged")
+    # Never remove a worktree on the default branch itself: it is always "merged".
+    candidates = [
+        (w, w.branch)
+        for w in managed_worktrees(worktrees)
+        if w.branch and f"refs/heads/{w.branch}" != default
+    ]
+    statuses = branch_merge_status([branch for _, branch in candidates])
+    merged = [(w, b) for w, b in candidates if statuses[b] in ("merged", "squashed")]
+    if not merged:
+        output.note("[dim]No merged worktrees[/]")
+        return
+
+    failed = []
+    for worktree, branch in merged:
+        if not remove_worktree(worktree, main, args.force, check=False):
+            failed.append(worktree.name)
+        # git branch -d would refuse squashed branches, and the check above already passed.
+        elif args.delete_branch and not delete_branch(branch, main, True, check=False):
+            failed.append(f"branch {branch}")
+    if failed:
+        raise WtError(f"could not remove: {', '.join(failed)}")
 
 
 def leftover_dirs(worktrees: list[Worktree]) -> list[str]:

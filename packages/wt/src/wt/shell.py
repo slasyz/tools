@@ -67,7 +67,8 @@ _wt() {
           _arguments $help_opts \
             '(-f --force)'{-f,--force}'[remove even with local changes]' \
             '(-D --delete-branch)'{-D,--delete-branch}'[also delete the branch]' \
-            '1:worktree:_wt_names'
+            '(1)--merged[remove all merged worktrees]' \
+            '(--merged)1:worktree:_wt_names'
           ;;
         init|completion)
           _arguments $help_opts '1:shell:(zsh bash fish)'
@@ -136,7 +137,7 @@ _wt() {
       ;;
     remove)
       if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-f --force -D --delete-branch -h --help" -- "$cur"))
+        COMPREPLY=($(compgen -W "-f --force -D --delete-branch --merged -h --help" -- "$cur"))
       else
         _wt_lines __names "$cur"
       fi
@@ -179,6 +180,8 @@ complete -c wt -n '__fish_seen_subcommand_from remove' -s f -l force \
     -d 'Remove even with local changes'
 complete -c wt -n '__fish_seen_subcommand_from remove' -s D -l delete-branch \
     -d 'Also delete the branch'
+complete -c wt -n '__fish_seen_subcommand_from remove' -l merged \
+    -d 'Remove all merged worktrees'
 
 complete -c wt -n '__fish_seen_subcommand_from init completion' -a 'zsh bash fish'
 """
@@ -186,7 +189,7 @@ complete -c wt -n '__fish_seen_subcommand_from init completion' -a 'zsh bash fis
 # Shared by zsh and bash. A child process cannot change the shell's directory,
 # so this function runs `cd` with the path that wt prints.
 SHELL_FUNCTION = r"""wt() {
-  local _wt_out _wt_main
+  local _wt_out _wt_main _wt_status
   case "$1" in
     add|cd)
       if [ "$1" = cd ]; then
@@ -202,10 +205,13 @@ SHELL_FUNCTION = r"""wt() {
       ;;
     remove)
       _wt_main="$(command wt dir 2>/dev/null)"
-      command wt "$@" || return
+      command wt "$@"
+      _wt_status=$?
+      # Even if wt failed, it may have removed the current directory.
       if [ ! -d "$PWD" ] && [ -n "$_wt_main" ]; then
         cd -- "$_wt_main"
       fi
+      return "$_wt_status"
       ;;
     *)
       command wt "$@"
@@ -230,10 +236,12 @@ FISH_FUNCTION = r"""function wt --description 'Manage git worktrees'
             end
         case remove
             set -l main (command wt dir 2>/dev/null)
-            command wt $argv; or return
+            command wt $argv
+            set -l wt_status $status
             if not test -d "$PWD"; and test -n "$main"
                 cd $main
             end
+            return $wt_status
         case '*'
             command wt $argv
     end
