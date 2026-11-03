@@ -39,6 +39,8 @@ wt help                          # full help (also: -h, --help)
 ```
 
 Output is colored in a terminal and plain when piped. Set `NO_COLOR=1` to turn colors off.
+`wt add` also shows the new worktree's directory on stderr, so it stays visible
+with shell integration. Stdout contains only the full path for scripts.
 
 `wt ls` shows `MERGED` as:
 

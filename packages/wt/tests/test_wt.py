@@ -91,6 +91,8 @@ def test_add_new_branch(env: Env, repo: Path) -> None:
     result = env.wt("add", "-b", "feature/some---feature", cwd=repo)
     path = Path(result.stdout.strip())
     assert f"Created {path.name} on new branch feature/some---feature" in result.stderr
+    assert f"  {path}\n" in result.stderr
+    assert result.stdout == f"{path}\n"
     assert "\x1b[" not in result.stderr
     assert path.parent == env.root
     assert path.name == "myproj-feature-some-feature"
@@ -120,7 +122,10 @@ def test_add_new_branch_with_base(env: Env, repo: Path) -> None:
 
 def test_add_existing_branch(env: Env, repo: Path) -> None:
     env.git("branch", "existing", cwd=repo)
-    path = add(env, repo, "existing")
+    result = env.wt("add", "existing", cwd=repo)
+    path = Path(result.stdout.strip())
+    assert f"  {path}\n" in result.stderr
+    assert result.stdout == f"{path}\n"
     assert env.git("branch", "--show-current", cwd=path) == "existing"
 
 
@@ -737,21 +742,21 @@ SHELL_FUNCTION_PROGRAMS = {
     "bash": [
         "bash",
         "-c",
-        '. "$0"; wt add -b feat 2>/dev/null && pwd && wt cd && pwd && cd "$OLDPWD"'
+        '. "$0"; wt add -b feat && pwd && wt cd && pwd && cd "$OLDPWD"'
         " && wt remove 2>/dev/null && pwd",
     ],
     "zsh": [
         "zsh",
         "-f",
         "-c",
-        '. "$0" 2>/dev/null; wt add -b feat 2>/dev/null && pwd && wt cd && pwd && cd "$OLDPWD"'
+        '. "$0" 2>/dev/null; wt add -b feat && pwd && wt cd && pwd && cd "$OLDPWD"'
         " && wt remove 2>/dev/null && pwd",
     ],
     "fish": [
         "fish",
         "--no-config",
         "-c",
-        "source $argv[1]; wt add -b feat 2>/dev/null; and pwd; and wt cd; and pwd; and cd -;"
+        "source $argv[1]; wt add -b feat; and pwd; and wt cd; and pwd; and cd -;"
         " and wt remove 2>/dev/null; and pwd",
     ],
 }
@@ -764,13 +769,16 @@ def test_shell_function_changes_directory(env: Env, repo: Path, shell: str) -> N
     script = env.tmp / f"init.{shell}"
     script.write_text(env.wt("init", shell, cwd=repo).stdout)
     shell_env = {**env.env, "PATH": f"{make_wt_bin(env)}:{env.env['PATH']}"}
-    out = subprocess.run(
+    result = subprocess.run(
         [*SHELL_FUNCTION_PROGRAMS[shell], str(script)],
         cwd=repo,
         env=shell_env,
         capture_output=True,
         text=True,
-    ).stdout.splitlines()
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout.splitlines()
+    assert f"  {env.root / 'myproj-feat'}\n" in result.stderr
     main = os.path.realpath(repo)
     assert len(out) == 3, out
     assert os.path.realpath(Path(out[0]).parent) == os.path.realpath(env.root)

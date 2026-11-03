@@ -13,7 +13,8 @@ export const MODELS = [
   "opencode-go/kimi-k2.7-code",
   "opencode-go/hy3",
   "openai-codex/gpt-6-luna",
-  "openai-codex/gpt-5.6-luna",
+  "openai-codex/gpt-6.1-sol",
+  "openai-codex/gpt-6.1-terra",
   "opencode-go/minimax-m3",
   "openrouter/anthropic/claude-haiku-4.5",
   "openrouter/openai/gpt-oss-120b",
@@ -31,7 +32,7 @@ export const BENCHMARK_MODELS = [
 ] as const satisfies readonly (typeof MODELS)[number][];
 
 export const INSTRUCTIONS =
-  "Generate a Git commit message from the supplied diff. Output exactly one short, tidy commit subject line and nothing else: no quotes, Markdown, explanation, bullet points, body, or surrounding whitespace. Use imperative mood, describe the actual change, keep it under 100 characters, start with capital letter, and do not end with a period. Use the recent commit subjects only as style context; do not copy them unless they accurately describe this diff. If there are several unrelated changes in this commit, describe them all.";
+  "Generate a Git commit message from the supplied diff. Output only the commit message, without surrounding quotes, Markdown fences, commentary, or surrounding whitespace. Start with a short, tidy subject line: use imperative mood, describe the actual change, keep it under 100 characters, start with a capital letter, and do not end with a period. When useful, add a blank line followed by a concise body explaining the changes or their purpose; bullet points are allowed in the body. A subject alone is fine for simple changes. Use the recent commit subjects only as style context; do not copy them unless they accurately describe this diff. If there are several unrelated changes in this commit, describe them all.";
 
 // Match the reference script: keep filenames and code, without hunk positions or hashes.
 export function compactDiff(diff: string): string {
@@ -61,4 +62,8 @@ export function firstSubject(text: string): string {
       .find((line) => line.trim().length > 0)
       ?.trim() ?? ""
   );
+}
+
+export function normalizeMessage(text: string): string {
+  return text.replaceAll("\r\n", "\n").trim();
 }

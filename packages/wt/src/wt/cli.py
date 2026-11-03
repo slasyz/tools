@@ -159,6 +159,7 @@ def cmd_add(args: argparse.Namespace) -> None:
     else:
         git_visible("worktree", "add", "--quiet", str(path), args.branch)
         done(f"Created [bold]{esc(path.name)}[/] on branch [cyan]{esc(args.branch)}[/]")
+    output.note(f"  [dim]{esc(str(path))}[/]")
     print(path)
 
 
