@@ -47,6 +47,11 @@ See [`sandbox.json`](./sandbox.json) for a small sample.
 }
 ```
 
+Set top-level `"allowGitCommonDir": true` so commits work in linked git
+worktrees. If `allowRead` or `allowWrite` contains `"."`, that list also gets
+the main worktree's `.git` directory. This also allows writes to that repo's
+`.git/hooks` and `.git/config`. Default: `false`.
+
 `*.example.com` permits subdomains, **not** `example.com`; list the base
 domain separately. Use `example.com:443` or `*.example.com:8443` to permit only
 that port; a rule without `:port` permits any port. Literal HTTP(S) URLs in bash

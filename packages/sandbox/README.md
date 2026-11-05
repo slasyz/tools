@@ -29,3 +29,8 @@ built-in defaults. Config writers accept one file path and add one rule without 
 `resolveAllowances` merges session rules without mutating config; writes imply
 reads. The runtime wrapper does not spawn processes or prompt users: the host
 handles its own shell, UI, timeouts, aborts, and process cleanup.
+
+Set top-level `"allowGitCommonDir": true` (default `false`) so commits work in
+linked git worktrees. `loadConfig(cwd)` then finds the repository's shared git
+dir (the main worktree's `.git`) and adds it to `allowRead` or `allowWrite`
+wherever that list contains `"."`. `cwd` defaults to `process.cwd()`.

@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,10 +11,13 @@ import {
   addReadPathToConfig,
   addWritePathToConfig,
   DEFAULT_CONFIG,
+  expandGitCommonDir,
+  findGitCommonDir,
   getConfigPath,
   loadConfig,
   mergeConfig,
 } from "../src/config.ts";
+import { buildRuntimeConfig } from "../src/runtime.ts";
 
 test("mergeConfig uses configured arrays instead of defaults", () => {
   const merged = mergeConfig(DEFAULT_CONFIG, {
@@ -82,6 +86,77 @@ test("loadConfig reads only ~/.agents/sandbox.json and ignores malformed JSON", 
     assert.deepEqual(loadConfig().network.allowedDomains, DEFAULT_CONFIG.network.allowedDomains);
   } finally {
     process.chdir(originalCwd);
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+  }
+});
+
+function gitWorktreeFixture(): { main: string; worktree: string } {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "sandbox-git-")));
+  const main = join(root, "main");
+  const worktree = join(root, "feature");
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: main, stdio: "ignore" });
+  mkdirSync(main);
+  git("init", "-q");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init");
+  git("worktree", "add", "-q", "-b", "feature", worktree);
+  mkdirSync(join(worktree, "sub"));
+  return { main, worktree };
+}
+
+test("findGitCommonDir returns the main worktree's .git", () => {
+  const { main, worktree } = gitWorktreeFixture();
+  assert.equal(findGitCommonDir(main), join(main, ".git"));
+  assert.equal(findGitCommonDir(join(worktree, "sub")), join(main, ".git"));
+  assert.equal(findGitCommonDir(mkdtempSync(join(tmpdir(), "sandbox-nogit-"))), undefined);
+});
+
+test("expandGitCommonDir copies '.' grants to the git common dir only when enabled", () => {
+  const { main, worktree } = gitWorktreeFixture();
+  const gitDir = join(main, ".git");
+  const base = mergeConfig(DEFAULT_CONFIG, {
+    filesystem: { allowRead: ["."], allowWrite: ["/tmp"] },
+  });
+  assert.equal(expandGitCommonDir(base, worktree), base);
+
+  const enabled = { ...base, allowGitCommonDir: true };
+  const expanded = expandGitCommonDir(enabled, worktree);
+  assert.deepEqual(expanded.filesystem.allowRead, [".", gitDir]);
+  assert.deepEqual(expanded.filesystem.allowWrite, ["/tmp"]);
+
+  const writable = expandGitCommonDir(
+    { ...enabled, filesystem: { ...enabled.filesystem, allowWrite: ["."] } },
+    worktree,
+  );
+  assert.deepEqual(writable.filesystem.allowWrite, [".", gitDir]);
+  assert.deepEqual(expandGitCommonDir(writable, worktree), writable);
+});
+
+test("mergeConfig reads allowGitCommonDir and buildRuntimeConfig strips it", () => {
+  assert.equal(mergeConfig(DEFAULT_CONFIG, {}).allowGitCommonDir, false);
+  const merged = mergeConfig(DEFAULT_CONFIG, { allowGitCommonDir: true });
+  assert.equal(merged.allowGitCommonDir, true);
+  assert.equal(
+    mergeConfig(DEFAULT_CONFIG, { allowGitCommonDir: "yes" as unknown as boolean })
+      .allowGitCommonDir,
+    false,
+  );
+  assert.equal("allowGitCommonDir" in buildRuntimeConfig(merged), false);
+});
+
+test("loadConfig applies allowGitCommonDir for the given cwd", () => {
+  const { main, worktree } = gitWorktreeFixture();
+  const home = mkdtempSync(join(tmpdir(), "sandbox-home-"));
+  const originalHome = process.env.HOME;
+  try {
+    process.env.HOME = home;
+    mkdirSync(join(home, ".agents"));
+    writeFileSync(
+      join(home, ".agents", "sandbox.json"),
+      JSON.stringify({ allowGitCommonDir: true, filesystem: { allowWrite: ["."] } }),
+    );
+    assert.deepEqual(loadConfig(worktree).filesystem.allowWrite, [".", join(main, ".git")]);
+  } finally {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
   }

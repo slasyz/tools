@@ -49,7 +49,7 @@ export function buildRuntimeConfig(
   allowances?: SessionAllowances,
 ): SandboxRuntimeConfig {
   const effective = resolveAllowances(config, allowances);
-  const { enabled: _enabled, ...runtimeOptions } = config;
+  const { enabled: _enabled, allowGitCommonDir: _allowGitCommonDir, ...runtimeOptions } = config;
   return SandboxRuntimeConfigSchema.parse({
     ...runtimeOptions,
     network: {

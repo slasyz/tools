@@ -42,7 +42,7 @@ export async function setupSandbox(ctx: Context) {
     throw new Error("opencode-sandbox requires a local server Location, not a remote workspace");
   const cwd = ctx.location.directory;
   const config = () => {
-    const current = locationConfig(loadConfig(), cwd);
+    const current = locationConfig(loadConfig(cwd), cwd);
     // Shared protection across all Location workers: a command must not replace
     // another Location's launcher or the launcher of its own next invocation.
     current.filesystem.denyWrite = [...current.filesystem.denyWrite, workerRoot()];

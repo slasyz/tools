@@ -1,10 +1,17 @@
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
-export type SandboxConfig = SandboxRuntimeConfig & { enabled?: boolean };
+export type SandboxConfig = SandboxRuntimeConfig & {
+  enabled?: boolean;
+  /**
+   * When "." is in allowRead or allowWrite, grant the same access to the git
+   * common dir (the main worktree's .git). Lets linked worktrees commit.
+   */
+  allowGitCommonDir?: boolean;
+};
 type NetworkConfig = NonNullable<SandboxConfig["network"]>;
 type FilesystemConfig = NonNullable<SandboxConfig["filesystem"]>;
 
@@ -15,6 +22,7 @@ export type SandboxConfigFile = Omit<Partial<SandboxConfig>, "network" | "filesy
 
 export const DEFAULT_CONFIG: SandboxConfig = {
   enabled: true,
+  allowGitCommonDir: false,
   network: {
     allowedDomains: [
       "npmjs.org",
@@ -62,6 +70,10 @@ export function mergeConfig(defaults: SandboxConfig, overrides: SandboxConfigFil
   const merged = mergeObjects(defaults, overrides);
   return {
     ...merged,
+    allowGitCommonDir:
+      typeof overrides.allowGitCommonDir === "boolean"
+        ? overrides.allowGitCommonDir
+        : defaults.allowGitCommonDir,
     network: {
       ...merged.network,
       allowedDomains:
@@ -108,8 +120,62 @@ export function getConfigPath(): string {
   return join(homedir(), ".agents", "sandbox.json");
 }
 
-export function loadConfig(): SandboxConfig {
-  return mergeConfig(DEFAULT_CONFIG, readJsonConfig(getConfigPath(), true));
+function readGitDirPointer(dotGit: string): string | undefined {
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, "utf-8"));
+  return match ? resolve(dirname(dotGit), match[1]) : undefined;
+}
+
+/**
+ * Find the git common dir for `cwd` by reading `.git` and `commondir` files,
+ * without running git. In a linked worktree this is the main worktree's .git.
+ */
+export function findGitCommonDir(cwd: string): string | undefined {
+  for (let dir = resolve(cwd); ; dir = dirname(dir)) {
+    const dotGit = join(dir, ".git");
+    try {
+      const stat = statSync(dotGit);
+      if (stat.isDirectory()) return dotGit;
+      if (!stat.isFile()) return undefined;
+      const gitDir = readGitDirPointer(dotGit);
+      if (!gitDir) return undefined;
+      const commonDirFile = join(gitDir, "commondir");
+      return existsSync(commonDirFile)
+        ? resolve(gitDir, readFileSync(commonDirFile, "utf-8").trim())
+        : gitDir;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
+    }
+    if (dirname(dir) === dir) return undefined;
+  }
+}
+
+function withPath(paths: string[] | undefined, path: string): string[] | undefined {
+  if (!paths?.includes(".") || paths.includes(path)) return paths;
+  return [...paths, path];
+}
+
+/** Apply `allowGitCommonDir`: copy "." grants to the git common dir of `cwd`. */
+export function expandGitCommonDir(config: SandboxConfig, cwd: string): SandboxConfig {
+  const filesystem = config.filesystem;
+  if (config.allowGitCommonDir !== true || !filesystem) return config;
+  if (!filesystem.allowRead?.includes(".") && !filesystem.allowWrite.includes(".")) return config;
+  const commonDir = findGitCommonDir(cwd);
+  if (!commonDir) return config;
+  return {
+    ...config,
+    filesystem: {
+      ...filesystem,
+      allowRead: withPath(filesystem.allowRead, commonDir),
+      allowWrite: withPath(filesystem.allowWrite, commonDir) ?? [],
+    },
+  };
+}
+
+export function loadConfig(cwd: string = process.cwd()): SandboxConfig {
+  return expandGitCommonDir(
+    mergeConfig(DEFAULT_CONFIG, readJsonConfig(getConfigPath(), true)),
+    cwd,
+  );
 }
 
 function writeConfigFile(configPath: string, config: SandboxConfigFile): void {

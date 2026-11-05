@@ -70,6 +70,11 @@ grants. `denyWrite` and `deniedDomains` remain hard blocks even after an allow
 grant. Direct file-tool reads require `allowRead` or `allowWrite`; an approved
 read rule can override `denyRead`, as in Pi.
 
+Set top-level `"allowGitCommonDir": true` so commits work in linked git
+worktrees. If `allowRead` or `allowWrite` contains `"."`, that list also gets
+the main worktree's `.git` directory. This also allows writes to that repo's
+`.git/hooks` and `.git/config`. Default: `false`.
+
 `*.example.com` matches subdomains, not the base domain. Include the base domain
 separately. A `:port` suffix restricts a domain rule to that port. `"*"` is not a
 supported network allow rule.

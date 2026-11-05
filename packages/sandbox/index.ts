@@ -3,6 +3,8 @@ export {
   getConfigPath,
   loadConfig,
   mergeConfig,
+  findGitCommonDir,
+  expandGitCommonDir,
   addDomainToConfig,
   addReadPathToConfig,
   addWritePathToConfig,
