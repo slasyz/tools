@@ -2,14 +2,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { test } from "node:test";
 
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
-
 import piSubagents from "../index.ts";
 import { forkSnapshot } from "../src/fork.ts";
-import { dialogBridge, widgetLines } from "../src/ui.ts";
+import { dialogBridge, renderAgents, widgetLines } from "../src/ui.ts";
 import { FakeConnection } from "./helpers.ts";
 
 const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
@@ -59,9 +58,14 @@ test("registers six tools, inherits current settings, updates widget, and notifi
     assert.equal(args[args.indexOf("--tools") + 1], "read,bash");
     assert.ok(args.includes("--no-approve"));
     assert.ok(
-      widgets.some(([, factory]) =>
-        factory?.(undefined, plainTheme).render(80).some((line: string) => line.includes("running")),
-      ),
+      widgets.some(([, factory]) => {
+        const widget = factory?.({ requestRender() {} }, plainTheme);
+        try {
+          return widget?.render(80).some((line: string) => line.includes("running"));
+        } finally {
+          widget?.dispose();
+        }
+      }),
     );
     connections[0].complete("found it");
     await tools.get("wait_agent").execute("wait", {}, undefined);
@@ -75,6 +79,90 @@ test("registers six tools, inherits current settings, updates widget, and notifi
   }
   assert.equal(connections[0].stopped, true);
   assert.equal(widgets.at(-1)[1], undefined);
+});
+
+test("spawn_agent accepts exact model overrides and rejects invalid IDs before launch", async () => {
+  const tools = new Map<string, any>();
+  const handlers = new Map<string, any>();
+  const connections: FakeConnection[] = [];
+  const current = { provider: "custom", id: "current" };
+  const override = { provider: "other", id: "org/alternate" };
+  const lookups: string[][] = [];
+  const pi = {
+    registerTool: (tool: any) => tools.set(tool.name, tool),
+    on: (name: string, handler: any) => handlers.set(name, handler),
+    sendMessage() {},
+    getActiveTools: () => ["read", "spawn_agent"],
+    getThinkingLevel: () => "high",
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd: process.cwd(),
+    model: current,
+    modelRegistry: {
+      find: (provider: string, id: string) => {
+        lookups.push([provider, id]);
+        return provider === override.provider && id === override.id ? override : undefined;
+      },
+    },
+    hasUI: false,
+    isProjectTrusted: () => true,
+    sessionManager: {
+      getBranch: () => [],
+      getCwd: () => process.cwd(),
+      getSessionFile: () => "/parent.jsonl",
+    },
+  } as unknown as ExtensionContext;
+  piSubagents(pi, (options) => {
+    const connection = new FakeConnection(options);
+    connections.push(connection);
+    return connection;
+  });
+  const spawn = (params: Record<string, unknown>, context = ctx) =>
+    tools
+      .get("spawn_agent")
+      .execute(
+        "spawn-call",
+        { task_name: "test", message: "work", ...params },
+        undefined,
+        undefined,
+        context,
+      );
+  try {
+    const schema = tools.get("spawn_agent").parameters;
+    assert.equal(schema.properties.model.type, "string");
+    assert.ok(!schema.required.includes("model"));
+    for (const options of [
+      { context: ctx, fork_turns: "none" },
+      { context: ctx, fork_turns: "all" },
+      { context: { ...ctx, model: undefined }, fork_turns: "none" },
+    ]) {
+      await spawn(
+        { model: "other/org/alternate", fork_turns: options.fork_turns },
+        options.context,
+      );
+      const connection = connections.at(-1)!;
+      const args = connection.options.args;
+      assert.equal(args[args.indexOf("--provider") + 1], "other");
+      assert.equal(args[args.indexOf("--model") + 1], "org/alternate");
+      assert.equal(args[args.indexOf("--thinking") + 1], "high");
+      assert.equal(args[args.indexOf("--tools") + 1], "read");
+      assert.ok(args.includes("--approve"));
+      assert.equal(ctx.model, current, "parent model must not change");
+      connection.complete();
+    }
+    assert.deepEqual(
+      lookups,
+      Array.from({ length: 3 }, () => ["other", "org/alternate"]),
+    );
+    for (const model of ["", "   ", "alternate", "/alternate", "other/"])
+      await assert.rejects(spawn({ model }), /exact provider\/model ID/);
+    for (const model of ["other/missing", "unknown/org/alternate", "other/org/alter"])
+      await assert.rejects(spawn({ model }), /Unknown model.*pi --list-models/);
+    await assert.rejects(spawn({}, { ...ctx, model: undefined }), /No current model/);
+    assert.equal(connections.length, 3, "invalid IDs must not launch a child");
+  } finally {
+    await handlers.get("session_shutdown")();
+  }
 });
 
 test("child processes do not register subagent tools", () => {
@@ -163,11 +251,72 @@ test("widget header counts statuses, and every line fits the width", () => {
     50,
   );
   assert.match(lines[0], /^── Subagents ─ 1 running · 1 idle · 1 failed ─+$/);
-  assert.equal(lines[1], "  ● agent-1   search");
+  assert.equal(lines[1], "  ⠋ agent-1   search");
   assert.match(stripTerminalSequences(lines[2]), /^  ✗ agent-2   x+…  failed$/);
   assert.equal(lines[3], "  ✓ agent-10  review");
   for (const line of lines) assert.ok(visibleWidth(line) <= 50, line);
   assert.equal(visibleWidth(lines[0]), 50);
+});
+
+test("widget animates running agents and stops its timer when replaced or cleared", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let widget: any;
+  let renders = 0;
+  const tui = { requestRender: () => renders++ };
+  const ctx = {
+    hasUI: true,
+    ui: {
+      setWidget: (_key: string, factory: any) => {
+        widget?.dispose();
+        widget = factory?.(tui, plainTheme);
+      },
+    },
+  } as unknown as ExtensionContext;
+  const running = { id: "agent-1", task_name: "work", status: "running" as const, run: 1 };
+  const idle = { id: "agent-2", task_name: "done", status: "idle" as const, run: 1 };
+  try {
+    renderAgents(ctx, [running, idle]);
+    const first = widget.render(50);
+    assert.equal(first[1], "  ⠋ agent-1  work");
+    t.mock.timers.tick(80);
+    assert.equal(renders, 1);
+    const next = widget.render(50);
+    assert.equal(next[1], "  ⠙ agent-1  work");
+    assert.equal(next[0], first[0]);
+    assert.equal(next[2], first[2]);
+    for (let frame = 2; frame <= 10; frame++) {
+      t.mock.timers.tick(80);
+      for (const line of widget.render(12)) assert.ok(visibleWidth(line) <= 12);
+    }
+    assert.deepEqual(widget.render(50), first, "spinner wraps after ten frames");
+
+    renderAgents(ctx, [{ ...running, status: "idle" }, idle]);
+    assert.equal(widget.render(50)[1], "  ✓ agent-1  work");
+    const stopped = renders;
+    t.mock.timers.tick(800);
+    assert.equal(renders, stopped, "idle widget must not animate");
+    for (const status of ["starting", "interrupted", "failed"] as const) {
+      renderAgents(ctx, [{ ...running, status }]);
+      const lines = widget.render(50);
+      t.mock.timers.tick(800);
+      assert.equal(renders, stopped, `${status} widget must not animate`);
+      assert.deepEqual(widget.render(50), lines);
+    }
+
+    renderAgents(ctx, [running]);
+    t.mock.timers.tick(80);
+    assert.equal(renders, stopped + 1, "animation restarts with a running agent");
+    renderAgents(ctx, []);
+    assert.equal(widget, undefined);
+    t.mock.timers.tick(800);
+    assert.equal(renders, stopped + 1, "clearing the widget stops its timer");
+
+    renderAgents({ hasUI: false } as ExtensionContext, [running]);
+    t.mock.timers.tick(800);
+    assert.equal(renders, stopped + 1);
+  } finally {
+    widget?.dispose();
+  }
 });
 
 test("dialog bridge serializes concurrent permissions and cancels stopped agents", async () => {
