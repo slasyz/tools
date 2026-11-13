@@ -4,17 +4,24 @@
 
 import {
   createBashToolDefinition,
-  DynamicBorder,
   highlightCode,
-  keyHint,
-  rawKeyHint,
   SettingsManager,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Box, Container, SelectList, Spacer, Text, type SelectItem } from "@earendil-works/pi-tui";
+import {
+  Box,
+  Container,
+  Key,
+  matchesKey,
+  SelectList,
+  Spacer,
+  Text,
+  type SelectItem,
+} from "@earendil-works/pi-tui";
 
 import { permissionDialog } from "./permission-status.ts";
+import { ALLOW_LABEL, DENY_LABEL, permissionFooter } from "./prompt-style.ts";
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
 
 type ApprovalResult = "approved" | "rejected" | "cancelled" | "too-long";
@@ -48,48 +55,53 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
 
   const choice = await permissionDialog<"cancel" | "run">(ctx, (tui, theme, _keybindings, done) => {
     const container = new Container();
-    container.addChild(new DynamicBorder((text: string) => theme.fg("warning", text)));
-    container.addChild(new Text(theme.fg("warning", theme.bold("⚠ Unsandboxed command")), 1, 0));
+    container.addChild(
+      new Text(
+        theme.fg("warning", `🚨 Allow this command ${theme.bold("outside the sandbox")}?`),
+        0,
+        0,
+      ),
+    );
     container.addChild(new Spacer(1));
 
     container.addChild(new Text(theme.fg("muted", "Directory"), 1, 0));
-    container.addChild(new Text(theme.fg("text", ctx.cwd), 2, 0));
+    container.addChild(new Text(theme.fg("accent", ctx.cwd), 3, 0));
     container.addChild(new Spacer(1));
 
     container.addChild(new Text(theme.fg("muted", "Command"), 1, 0));
-    const commandBox = new Box(1, 0, (text: string) => theme.bg("toolPendingBg", text));
+    const commandBox = new Box(3, 0, (text: string) => theme.bg("toolPendingBg", text));
     commandBox.addChild(new Text(highlightCode(command, "bash").join("\n"), 0, 0));
     container.addChild(commandBox);
     container.addChild(new Spacer(1));
 
     const items: SelectItem[] = [
-      { value: "run", label: "Approve" },
-      { value: "cancel", label: "Reject" },
+      { value: "run", label: ALLOW_LABEL },
+      { value: "cancel", label: DENY_LABEL },
     ];
     const selectList = new SelectList(items, items.length, {
       selectedPrefix: (text) => theme.fg("accent", text),
-      selectedText: (text) => theme.fg("accent", text),
+      selectedText: (text) => theme.fg("accent", theme.bold(text)),
       description: (text) => theme.fg("muted", text),
       scrollInfo: (text) => theme.fg("dim", text),
       noMatch: (text) => theme.fg("warning", text),
     });
     selectList.onSelect = (item) => done(item.value as "cancel" | "run");
     selectList.onCancel = () => done("cancel");
-    container.addChild(selectList);
+    const choices = new Box(1, 0);
+    choices.addChild(selectList);
+    container.addChild(choices);
+    container.addChild(new Spacer(1));
 
-    container.addChild(
-      new Text(
-        `${rawKeyHint("↑↓", "navigate")} • ${keyHint("tui.select.confirm", "select")} • ${keyHint("tui.select.cancel", "cancel")}`,
-        1,
-        0,
-      ),
-    );
-    container.addChild(new DynamicBorder((text: string) => theme.fg("warning", text)));
+    container.addChild(new Text(permissionFooter(theme), 0, 0));
 
     return {
       render: (width) => container.render(width),
       invalidate: () => container.invalidate(),
       handleInput: (data) => {
+        if (matchesKey(data, Key.ctrl("c"))) {
+          done("cancel");
+          return;
+        }
         selectList.handleInput(data);
         tui.requestRender();
       },

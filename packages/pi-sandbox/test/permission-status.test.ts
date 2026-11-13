@@ -1,14 +1,17 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
 
+import { stripVTControlCharacters } from "node:util";
+
 import {
   createEventBus,
   initTheme,
+  type KeybindingsManager,
   type ExtensionAPI,
   type ExtensionContext,
-  type KeybindingsManager,
   type Theme,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import assert from "node:assert/strict";
 import { expect, test, vi } from "vitest";
 
@@ -40,7 +43,7 @@ function createPrompt(mode: "tui" | "rpc" = "tui") {
       custom: async (factory: Parameters<ExtensionContext["ui"]["custom"]>[0]) =>
         new Promise((resolve) => {
           close = resolve;
-          const result = factory(tui, theme, {} as KeybindingsManager, resolve);
+          const result = factory(tui, theme, getKeybindings() as KeybindingsManager, resolve);
           assert.ok(!(result instanceof Promise));
           component = result;
         }),
@@ -61,6 +64,7 @@ function createPrompt(mode: "tui" | "rpc" = "tui") {
     write,
     input: (key: string) => component?.handleInput?.(key),
     cancel: () => close?.(undefined),
+    render: (width = 200) => component!.render(width),
   };
 }
 
@@ -148,6 +152,33 @@ test("does not write terminal status for RPC permission prompts", async () => {
     ctx,
   );
   expect(write).not.toHaveBeenCalled();
+});
+
+test("unsandboxed approval uses the shared layout and displays the full command", async () => {
+  initTheme("dark", false);
+  const { pi, ctx, input, render } = createPrompt();
+  const command = `printf ${"x".repeat(100)}`;
+  const pending = createUnsandboxedTool(pi).execute("test", { command }, undefined, undefined, ctx);
+  const plain = render()
+    .map((line) => stripVTControlCharacters(line).trimEnd())
+    .join("\n");
+  expect(plain).toContain("🚨 Allow this command outside the sandbox?");
+  expect(plain).toContain(ctx.cwd);
+  expect(plain).toContain(command);
+  expect(plain).toContain(" → ✅ Allow\n   ❌ Deny");
+  expect(plain).toContain("↑↓ navigate • enter select • esc deny");
+  expect(plain).not.toContain("─");
+  const narrow = render(24);
+  expect(narrow.every((line) => visibleWidth(line) <= 24)).toBe(true);
+  const unwrapped = narrow.map((line) => stripVTControlCharacters(line).trim()).join("");
+  expect(unwrapped).toContain(ctx.cwd);
+  expect(unwrapped).toContain("x".repeat(100));
+  input("\x1b[B");
+  expect(render().map(stripVTControlCharacters).join("\n")).toContain(" → ❌ Deny");
+  input("\r");
+  expect((await pending).content).toEqual([
+    { type: "text", text: "Command not run: user denied permission." },
+  ]);
 });
 
 test("does not write terminal status without a UI", async () => {

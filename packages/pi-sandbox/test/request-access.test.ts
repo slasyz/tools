@@ -9,6 +9,7 @@ import {
   type ExtensionContext,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import { DEFAULT_CONFIG } from "sandbox";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -252,16 +253,49 @@ test("TUI styles access and paths, wraps rather than truncates, and uses Allow/D
           done,
         );
         lines = component.render(200);
-        expect(lines[0]).toContain("\x1b[1mread");
+        expect(lines[0]).toContain("📖 Allow \x1b[1mread");
         expect(lines[2]).toContain(`\x1b[36m${request.path}`);
-        const narrow = component.render(18).map(stripVTControlCharacters).join("");
+        const narrowLines = component.render(18);
+        expect(narrowLines.every((line: string) => visibleWidth(line) <= 18)).toBe(true);
+        const narrow = narrowLines.map(stripVTControlCharacters).join("");
         expect(narrow).toContain(request.path);
         expect(narrow).toContain(request.target);
         component.handleInput("enter");
       }),
   });
   expect(await promptSessionAccess(f.pi, f.ctx, [request])).toBe(true);
-  expect(lines.map(stripVTControlCharacters).join("\n")).toContain("[Allow]  [Deny]");
+  const plain = lines.map(stripVTControlCharacters).join("\n");
+  expect(plain).toContain(" → ✅ Allow\n   ❌ Deny");
+  expect(plain).toContain("↑↓ navigate • enter select • esc deny");
+});
+
+test("TUI batch displays both access types and denies the whole batch", async () => {
+  const f = await fixture();
+  Object.assign(f.ctx, { mode: "tui" });
+  Object.assign(f.ctx.ui, {
+    custom: async (factory: Function) =>
+      new Promise((done) => {
+        const component = factory(
+          { terminal: { write() {} }, requestRender() {} },
+          { bold: (value: string) => value, fg: (_color: string, value: string) => value },
+          getKeybindings(),
+          done,
+        );
+        const plain = component.render(200).join("\n");
+        expect(plain).toContain("📁 Allow filesystem access for this session?");
+        expect(plain).toContain("read  /input");
+        expect(plain).toContain("write /output");
+        component.handleInput("\x1b[B");
+        expect(component.render(200).join("\n")).toContain(" → ❌ Deny");
+        component.handleInput("\r");
+      }),
+  });
+  expect(
+    await promptSessionAccess(f.pi, f.ctx, [
+      { path: "/input", target: "/input", access: "read" },
+      { path: "/output", target: "/output", access: "write" },
+    ]),
+  ).toBe(false);
 });
 
 test("TUI timeout denies without user input", async () => {

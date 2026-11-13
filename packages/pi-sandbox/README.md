@@ -73,7 +73,12 @@ pi --no-sandbox                  disable sandboxing for this invocation
 /sandbox-allow write <path>      ask to allow writes to a path
 ```
 
-Prompts can abort, allow for this session, or save a rule in `~/.agents/sandbox.json`.
+Terminal prompts use **✅ Allow** and **❌ Deny**, with bold access types,
+highlighted paths, and vertical choices. Use ↑↓ to navigate, Enter to select,
+and Esc to deny. Rule prompts also offer **🔓 Allow for all projects**, which
+requires a second confirmation before saving to `~/.agents/sandbox.json`.
+Tab edits the selected allow rule; Esc resets an edit, and Ctrl+C denies.
+There are no letter hotkeys. Paths and commands wrap rather than truncate.
 Prompts without a UI abort. In RPC mode, permission prompts use Pi's extension UI
 protocol and time out after five minutes. The RPC client must handle
 `extension_ui_request` records and send matching `extension_ui_response` records;
@@ -113,7 +118,7 @@ Targets are checked again after approval; a changed target requires a new reques
 Hard write denies apply to both names and cannot be overridden.
 
 Pi's terminal prompt highlights access types and paths; RPC prompts use plain
-text with the same layout. Missing UI, cancellation, timeout, or denial grants
+text. Missing UI, cancellation, timeout, or denial grants
 nothing. Requests too large to display in full are rejected, not truncated.
 
 The agent should request the narrowest access needed without asking separately

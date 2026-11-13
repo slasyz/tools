@@ -419,7 +419,7 @@ export default function (pi: ExtensionAPI) {
       const choice = await showPermissionPrompt(
         pi,
         ctx,
-        `Add ${target} to ${configKey}?`,
+        { access: kind === "domain" ? "network" : kind },
         target,
         (value) => {
           if (!value) return "Rule cannot be empty.";

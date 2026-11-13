@@ -1,5 +1,5 @@
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Input, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Input, Key, matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import {
   domainIsAllowed,
   matchesPattern,
@@ -9,6 +9,15 @@ import {
 } from "sandbox";
 
 import { permissionDialog } from "./permission-status.ts";
+import {
+  ALLOW_LABEL,
+  DENY_LABEL,
+  GLOBAL_ALLOW_LABEL,
+  permissionFooter,
+  permissionOption,
+  permissionTitle,
+  type AccessKind,
+} from "./prompt-style.ts";
 
 export type PermissionChoice = "abort" | "session" | "global";
 
@@ -21,21 +30,15 @@ export const RPC_PERMISSION_PROMPT_TIMEOUT_MS = 5 * 60_000;
 
 interface PromptOption {
   label: string;
-  key: string;
   action: PermissionChoice;
-  confirm?: boolean;
-  hint?: string;
 }
 
 const PERMISSION_OPTIONS: PromptOption[] = [
-  { label: "Allow for this session only", key: "s", action: "session" },
-  { label: "Abort (keep blocked)", key: "esc", action: "abort" },
+  { label: ALLOW_LABEL, action: "session" },
+  { label: DENY_LABEL, action: "abort" },
   {
-    label: "Allow for all projects",
-    key: "A",
+    label: GLOBAL_ALLOW_LABEL,
     action: "global",
-    confirm: true,
-    hint: "→ ~/.agents/sandbox.json",
   },
 ];
 
@@ -117,7 +120,7 @@ async function showRpcPermissionPrompt(
 export async function showPermissionPrompt(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  title: string,
+  title: string | { access: AccessKind },
   originalValue: string,
   validateValue: (value: string) => string | null,
 ): Promise<PermissionPromptResult> {
@@ -126,12 +129,18 @@ export async function showPermissionPrompt(
   pi.events.emit("request-attention", { message: "Sandbox permission required" });
 
   if (ctx.mode === "rpc") {
-    return showRpcPermissionPrompt(ctx, title, originalValue, validateValue);
+    const heading = typeof title === "string" ? title : permissionTitle(title.access);
+    return showRpcPermissionPrompt(
+      ctx,
+      `${heading}\n\n  ${originalValue}`,
+      originalValue,
+      validateValue,
+    );
   }
 
   if (ctx.mode !== "tui") return { action: "abort", value: originalValue };
 
-  const result = await permissionDialog<PermissionPromptResult>(ctx, (tui, theme, _kb, done) => {
+  const result = await permissionDialog<PermissionPromptResult>(ctx, (tui, theme, kb, done) => {
     const input = new Input();
     let selectedIndex = 0;
     let pendingAction: PermissionChoice | null = null;
@@ -167,9 +176,15 @@ export async function showPermissionPrompt(
       const value = editing ? input.getValue().trim() : originalValue;
       const validationError = validateValue(value);
       if (validationError) {
+        if (!editing) beginEditing();
         error = validationError;
         editing = true;
         updateFocus();
+        tui.requestRender();
+        return;
+      }
+      if (action === "global" && pendingAction !== "global") {
+        pendingAction = "global";
         tui.requestRender();
         return;
       }
@@ -185,40 +200,37 @@ export async function showPermissionPrompt(
         updateFocus();
       },
       render(width: number): string[] {
-        const lines = [truncateToWidth(theme.fg("warning", title), width), ""];
+        const heading =
+          typeof title === "string"
+            ? title
+            : permissionTitle(title.access, (value) => theme.bold(value));
+        const lines = [
+          theme.fg("warning", heading),
+          "",
+          `   ${theme.fg("accent", originalValue)}`,
+          "",
+        ];
         for (let i = 0; i < PERMISSION_OPTIONS.length; i++) {
           const option = PERMISSION_OPTIONS[i]!;
           const isSelected = i === selectedIndex;
-          const prefix = isSelected ? " → " : "   ";
-          const keyHint = theme.fg("accent", `[${option.key}]`);
-          let label = option.label;
-
+          lines.push(permissionOption(theme, option.label, isSelected));
           if (editing && isSelected && isAllowOption(option)) {
-            const separator = " ";
-            const inputWidth = Math.max(
-              1,
-              width - visibleWidth(`${prefix}${keyHint} ${label}${separator}`),
-            );
-            label += `${separator}${theme.fg("accent", input.render(inputWidth)[0] ?? "")}`;
-          } else if (option.hint) {
-            label += `  ${theme.fg("dim", option.hint)}`;
+            lines.push(`   ${theme.fg("accent", input.render(Math.max(1, width - 3))[0] ?? "")}`);
           }
           if (pendingAction === option.action) {
-            label += `  ${theme.fg("warning", "→ press Enter to confirm")}`;
+            lines.push(
+              `   ${theme.fg("warning", "Confirm saving this rule to ~/.agents/sandbox.json.")}`,
+            );
           }
-          lines.push(truncateToWidth(`${prefix}${keyHint} ${label}`, width));
           if (editing && isSelected && error) {
-            lines.push(truncateToWidth(theme.fg("error", `   ✗ ${error}`), width));
+            lines.push(theme.fg("error", `   ✗ ${error}`));
           }
         }
         lines.push("");
-        const footer = editing
-          ? "↑↓ navigate, enter confirm, esc reset, ctrl+c cancel"
-          : pendingAction
-            ? "↑↓ navigate, tab edit, enter confirm, esc/ctrl+c cancel"
-            : "↑↓ navigate, tab edit, enter select, esc/ctrl+c cancel";
-        lines.push(truncateToWidth(theme.fg("dim", footer), width));
-        return lines;
+        lines.push(
+          permissionFooter(theme, { editing, editRule: true, confirm: pendingAction !== null }),
+        );
+        return lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
       },
       handleInput(data: string): void {
         if (matchesKey(data, Key.ctrl("c"))) {
@@ -226,32 +238,32 @@ export async function showPermissionPrompt(
           return;
         }
         if (editing) {
-          if (matchesKey(data, Key.escape)) {
+          if (kb.matches(data, "tui.select.cancel")) {
+            pendingAction = null;
             stopEditing();
             tui.requestRender();
             return;
           }
-          if (matchesKey(data, Key.enter)) {
+          if (kb.matches(data, "tui.select.confirm")) {
             resolve(selectedOption().action);
             return;
           }
-          if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
-            const delta = matchesKey(data, Key.up) ? -1 : 1;
-            selectedIndex = Math.max(
-              0,
-              Math.min(PERMISSION_OPTIONS.length - 1, selectedIndex + delta),
-            );
+          if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
+            const delta = kb.matches(data, "tui.select.up") ? -1 : 1;
+            selectedIndex =
+              (selectedIndex + delta + PERMISSION_OPTIONS.length) % PERMISSION_OPTIONS.length;
             pendingAction = null;
             stopEditing();
             tui.requestRender();
             return;
           }
           input.handleInput(data);
+          pendingAction = null;
           error = null;
           tui.requestRender();
           return;
         }
-        if (matchesKey(data, Key.escape)) {
+        if (kb.matches(data, "tui.select.cancel")) {
           resolve("abort");
           return;
         }
@@ -260,36 +272,17 @@ export async function showPermissionPrompt(
           tui.requestRender();
           return;
         }
-        if (matchesKey(data, Key.enter)) {
+        if (kb.matches(data, "tui.select.confirm")) {
           resolve(pendingAction ?? selectedOption().action);
           return;
         }
-        if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
-          const delta = matchesKey(data, Key.up) ? -1 : 1;
-          selectedIndex = Math.max(
-            0,
-            Math.min(PERMISSION_OPTIONS.length - 1, selectedIndex + delta),
-          );
+        if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
+          const delta = kb.matches(data, "tui.select.up") ? -1 : 1;
+          selectedIndex =
+            (selectedIndex + delta + PERMISSION_OPTIONS.length) % PERMISSION_OPTIONS.length;
           pendingAction = null;
           tui.requestRender();
           return;
-        }
-        for (let i = 0; i < PERMISSION_OPTIONS.length; i++) {
-          const option = PERMISSION_OPTIONS[i]!;
-          if (data === option.key) {
-            resolve(option.action);
-            return;
-          }
-          if (data.toLowerCase() === option.key.toLowerCase()) {
-            if (option.confirm) {
-              pendingAction = option.action;
-              selectedIndex = i;
-            } else {
-              resolve(option.action);
-            }
-            tui.requestRender();
-            return;
-          }
         }
       },
       invalidate(): void {
@@ -312,13 +305,8 @@ export function promptDomainBlock(
   domain: NetworkDestination,
 ): Promise<PermissionPromptResult> {
   const target = `${domain.host}:${domain.port}`;
-  return showPermissionPrompt(
-    pi,
-    ctx,
-    `🌐 Network blocked: "${target}" is not in allowedDomains`,
-    target,
-    (value) =>
-      validRule(value, domainIsAllowed(domain.host, [value], domain.port), `domain "${target}"`),
+  return showPermissionPrompt(pi, ctx, { access: "network" }, target, (value) =>
+    validRule(value, domainIsAllowed(domain.host, [value], domain.port), `domain "${target}"`),
   );
 }
 
@@ -327,12 +315,8 @@ export function promptReadBlock(
   ctx: ExtensionContext,
   path: string,
 ): Promise<PermissionPromptResult> {
-  return showPermissionPrompt(
-    pi,
-    ctx,
-    `📖 Read blocked: "${path}" is not in allowRead`,
-    path,
-    (value) => validRule(value, matchesPattern(path, [value]), `path "${path}"`),
+  return showPermissionPrompt(pi, ctx, { access: "read" }, path, (value) =>
+    validRule(value, matchesPattern(path, [value]), `path "${path}"`),
   );
 }
 
@@ -341,12 +325,8 @@ export function promptWriteBlock(
   ctx: ExtensionContext,
   path: string,
 ): Promise<PermissionPromptResult> {
-  return showPermissionPrompt(
-    pi,
-    ctx,
-    `📝 Write blocked: "${path}" is not in allowWrite`,
-    path,
-    (value) => validRule(value, matchesPattern(path, [value]), `path "${path}"`),
+  return showPermissionPrompt(pi, ctx, { access: "write" }, path, (value) =>
+    validRule(value, matchesPattern(path, [value]), `path "${path}"`),
   );
 }
 

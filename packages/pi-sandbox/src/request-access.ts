@@ -13,6 +13,13 @@ import {
 } from "sandbox";
 
 import { permissionDialog } from "./permission-status.ts";
+import {
+  ALLOW_LABEL,
+  DENY_LABEL,
+  permissionFooter,
+  permissionOption,
+  permissionTitle,
+} from "./prompt-style.ts";
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
 
 export async function promptSessionAccess(
@@ -22,6 +29,9 @@ export async function promptSessionAccess(
   signal?: AbortSignal,
 ): Promise<boolean> {
   if (!ctx.hasUI || signal?.aborted) return false;
+  const access = requests.every((request) => request.access === requests[0]?.access)
+    ? requests[0]!.access
+    : "filesystem";
   pi.events.emit("request-attention", { message: "Sandbox permission required" });
   if (ctx.mode === "rpc") {
     const choice = await ctx.ui.select(
@@ -44,20 +54,27 @@ export async function promptSessionAccess(
       if (signal?.aborted) done(false);
       return {
         render(width) {
-          const title = formatAccessRequestTitle(requests, (value) => theme.bold(value));
+          const title = theme.fg(
+            "warning",
+            permissionTitle(access, (value) => theme.bold(value)),
+          );
           const message = formatAccessRequestMessage(
             requests,
             (value) => theme.fg("accent", value),
             (value) => theme.bold(value),
           );
-          const buttons = ["Allow", "Deny"]
-            .map((label, index) =>
-              index === selected ? theme.fg("accent", theme.bold(`[${label}]`)) : `[${label}]`,
-            )
-            .join("  ");
-          return [title, "", ...message.split("\n"), "", buttons].flatMap((line) =>
-            wrapTextWithAnsi(line, Math.max(1, width)),
+          const buttons = [ALLOW_LABEL, DENY_LABEL].map((label, index) =>
+            permissionOption(theme, label, index === selected),
           );
+          return [
+            title,
+            "",
+            ...message.split("\n").map((line) => ` ${line}`),
+            "",
+            ...buttons,
+            "",
+            permissionFooter(theme),
+          ].flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
         },
         handleInput(data) {
           if (
@@ -69,9 +86,6 @@ export async function promptSessionAccess(
           } else if (keybindings.matches(data, "tui.select.confirm")) {
             done(selected === 0);
           } else if (
-            matchesKey(data, Key.left) ||
-            matchesKey(data, Key.right) ||
-            matchesKey(data, Key.tab) ||
             keybindings.matches(data, "tui.select.up") ||
             keybindings.matches(data, "tui.select.down")
           ) {
