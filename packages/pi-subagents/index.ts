@@ -17,6 +17,16 @@ const messageSchema = Type.Object({
   message: Type.String({ minLength: 1, maxLength: 100_000 }),
 });
 const messagePreview = (text: string) => preview(text, 48_000, 1800);
+const subagentInstructions = `You are the subagent the parent has already spawned.
+Any conversation above is inherited background, not unfinished work for you to resume.
+Requests there to consult another agent explain why you were created; you are that agent.
+Do not repeat that delegation, including through tools, shell commands, or other agent CLIs.
+
+Perform the assignment below and subsequent parent steering or follow-up requests yourself.
+Return your results to the parent.
+
+Assignment:
+`;
 const result = <T>(data: T) => ({
   content: [{ type: "text" as const, text: messagePreview(JSON.stringify(data, null, 2)) }],
   details: data,
@@ -68,7 +78,8 @@ export default function piSubagents(
   });
 
   pi.registerCommand("agents", {
-    description: "Select a subagent and copy a command to open its saved transcript in a new Pi session",
+    description:
+      "Select a subagent and copy a command to open its saved transcript in a new Pi session",
     handler: async (_args, ctx) => {
       await copyAgentSnapshot(ctx, manager.list());
     },
@@ -136,7 +147,7 @@ export default function piSubagents(
       return result(
         await manager.spawn({
           task_name: params.task_name,
-          message: params.message,
+          message: subagentInstructions + params.message,
           cwd: ctx.cwd,
           args,
           signal,

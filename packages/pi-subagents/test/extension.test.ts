@@ -76,6 +76,26 @@ test("registers six tools, inherits current settings, updates widget, and notifi
     assert.equal(tools.get("spawn_agent").parameters.properties.fork_turns.default, "all");
     const snapshot = await readFile(args[args.indexOf("--session") + 1], "utf8");
     assert.match(snapshot, /parent context/, "omitting fork_turns must copy parent history");
+    assert.deepEqual(connections[0].commands, [
+      { type: "get_state" },
+      {
+        type: "prompt",
+        message: `You are the subagent the parent has already spawned.
+Any conversation above is inherited background, not unfinished work for you to resume.
+Requests there to consult another agent explain why you were created; you are that agent.
+Do not repeat that delegation, including through tools, shell commands, or other agent CLIs.
+
+Perform the assignment below and subsequent parent steering or follow-up requests yourself.
+Return your results to the parent.
+
+Assignment:
+find it`,
+      },
+    ]);
+    assert.ok(
+      !handlers.has("before_agent_start"),
+      "role instructions must not change the system prompt",
+    );
     assert.equal(args[args.indexOf("--provider") + 1], "custom");
     assert.equal(args[args.indexOf("--model") + 1], "current");
     assert.equal(args[args.indexOf("--thinking") + 1], "high");
@@ -91,6 +111,16 @@ test("registers six tools, inherits current settings, updates widget, and notifi
         }
       }),
     );
+    await tools
+      .get("send_message")
+      .execute("steer", { target: "agent-1", message: "focus" }, undefined);
+    await tools
+      .get("followup_task")
+      .execute("follow", { target: "agent-1", message: "then test" }, undefined);
+    assert.deepEqual(connections[0].commands.slice(2), [
+      { type: "prompt", message: "focus", streamingBehavior: "steer" },
+      { type: "prompt", message: "then test", streamingBehavior: "followUp" },
+    ]);
     connections[0].complete("found it");
     await tools.get("wait_agent").execute("wait", {}, undefined);
     assert.equal(messages.length, 1);
@@ -98,6 +128,15 @@ test("registers six tools, inherits current settings, updates widget, and notifi
     assert.equal(messages[0][1].deliverAs, "steer");
     assert.match(messages[0][0].content, /found it/);
     assert.equal(JSON.parse(response.content[0].text).id, "agent-1");
+    await tools
+      .get("followup_task")
+      .execute("resume", { target: "agent-1", message: "more" }, undefined);
+    assert.equal(connections.length, 1, "idle follow-ups must reuse the child's context");
+    assert.deepEqual(connections[0].commands.at(-1), {
+      type: "prompt",
+      message: "more",
+      streamingBehavior: "followUp",
+    });
   } finally {
     await handlers.get("session_shutdown")();
   }
@@ -179,6 +218,12 @@ test("spawn_agent accepts exact model overrides and rejects invalid IDs before l
       assert.equal(args[args.indexOf("--thinking") + 1], "high");
       assert.equal(args[args.indexOf("--tools") + 1], "read");
       assert.ok(args.includes("--approve"));
+      const prompt = connection.commands.find((command) => command.type === "prompt")!;
+      assert.match(prompt.message, /^You are the subagent the parent has already spawned\./);
+      assert.ok(
+        prompt.message.endsWith("Assignment:\nwork"),
+        "fresh and forked agents must receive the original assignment",
+      );
       assert.equal(ctx.model, current, "parent model must not change");
       connection.complete();
     }

@@ -58,6 +58,10 @@ shows the command for manual copying.
 - `fork_turns: "all"` is the default and copies the active session branch,
   including compaction records, before the spawning tool-call turn. It does not copy
   unfinished tool calls or abandoned branches. Set `fork_turns: "none"` for fresh context.
+- The initial assignment includes a role reminder: inherited history is background,
+  the child is the requested subagent, and it must do the work without further delegation.
+  This reminder is part of the assignment message, not a system-prompt change or a
+  history rewrite. Steering and follow-up messages are sent unchanged in the same session.
 - Four agents may work concurrently; up to 32 agents can exist per parent session.
   Idle subprocesses stay available for follow-ups. Nested spawning is disabled.
 - Agents share files and permissions, not isolated worktrees. Avoid overlapping
