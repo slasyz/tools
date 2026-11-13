@@ -9,6 +9,14 @@ import { formatSandboxStatus, type SandboxStatus } from "./ui.ts";
 
 export async function permissionDialog(ctx: Context, request: PendingPrompt): Promise<PromptReply> {
   const abort: PromptReply = { action: "abort", value: request.target, confirmed: false };
+  if (request.kind === "access") {
+    const confirmed = await ctx.ui.dialog.confirm({
+      title: request.title,
+      message: request.target,
+      label: { confirm: "Allow", cancel: "Deny" },
+    });
+    return confirmed ? { action: "session", value: request.target, confirmed: true } : abort;
+  }
   if (request.kind === "disable" || request.kind === "unsandboxed") {
     const confirmed = await ctx.ui.dialog.confirm({
       title: request.title,

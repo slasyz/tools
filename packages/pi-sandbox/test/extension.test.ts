@@ -33,6 +33,7 @@ test("loading pi-sandbox does not register tools owned by permission requesters"
   registerSandboxExtension(api);
 
   assert.equal(registeredToolNames.includes("apply_patch"), false);
+  assert.equal(registeredToolNames.includes("sandbox_request_access"), true);
 });
 
 test("an inactive pi-sandbox rejects authorization requests", async () => {

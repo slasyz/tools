@@ -6,6 +6,14 @@ import {
   addDomainToConfig,
   addReadPathToConfig,
   addWritePathToConfig,
+  ACCESS_REQUEST_SCHEMA,
+  ACCESS_REQUEST_DESCRIPTION,
+  resolveAccessRequests,
+  assertAccessRequestsUnchanged,
+  assertAccessRequestsWritable,
+  addSessionAccessRequests,
+  formatAccessRequestTitle,
+  formatAccessRequestMessage,
   domainIsAllowed,
   extractDomainsFromCommand,
   getConfigPath,
@@ -32,8 +40,9 @@ import { createWorkerExecutables, sandboxShell, ShellTickets, workerRoot } from 
 // tool-specific instructions to the model.
 const UNSANDBOXED_DESCRIPTION = [
   "Execute a shell command outside the sandbox after explicit user approval for this invocation. Uses OpenCode's standard shell output limits, timeouts, cancellation, and background jobs.",
+  "For grantable filesystem restrictions, prefer sandbox_request_access to keep the operation sandboxed. If that request is denied, do not use shell_unsandboxed to bypass the denial.",
   "Use shell by default. Use shell_unsandboxed only when the user explicitly requests unsandboxed execution, shell fails due to a sandbox restriction, or clear evidence shows the command will hit one.",
-  "When shell fails because of sandbox filesystem, permission, or network restrictions, use shell_unsandboxed for the same command without first asking in chat; this tool requests explicit user approval. Before retrying, check whether the failed command made partial changes and whether repeating it is safe. Do not use shell_unsandboxed for unrelated commands or ordinary command errors.",
+  "For sandbox restrictions that cannot be addressed with sandbox_request_access, use shell_unsandboxed for the same command without first asking in chat; this tool requests explicit user approval. Before retrying, check whether the failed command made partial changes and whether repeating it is safe. Do not use shell_unsandboxed for unrelated commands or ordinary command errors.",
   "Use shell_unsandboxed without a trial shell call when clear evidence shows the command will hit a sandbox filesystem, permission, or network restriction.",
 ].join("\n\n");
 
@@ -211,6 +220,47 @@ export async function setupSandbox(ctx: Context) {
     ]),
   ) as RpcHandlers<typeof SandboxRpc>;
   await ctx.rpc.register(SandboxRpc, protectedHandlers);
+
+  await ctx.tool.transform((editor) => {
+    editor.add({
+      name: "sandbox_request_access",
+      input: ACCESS_REQUEST_SCHEMA,
+      description: ACCESS_REQUEST_DESCRIPTION,
+      options: { codemode: false },
+      async execute(input, context) {
+        await checkSession(context.sessionID);
+        const signal = AbortSignal.any([context.signal, shutdown.signal]);
+        const check = () => {
+          if (signal.aborted) throw new Error("Sandbox authorization cancelled");
+          if (!enabled(context.sessionID)) throw new Error("Sandbox is inactive");
+        };
+        check();
+        const requests = resolveAccessRequests(input, cwd);
+        assertAccessRequestsWritable(requests, config().filesystem.denyWrite, cwd);
+        const message = formatAccessRequestMessage(requests);
+        const reply = await prompts.ask(
+          {
+            sessionID: context.sessionID,
+            kind: "access",
+            target: message,
+            title: formatAccessRequestTitle(requests),
+          },
+          signal,
+        );
+        check();
+        // Do not accept global or edited replies, even from another RPC client.
+        if (reply.action !== "session" || !reply.confirmed || reply.value !== message) {
+          throw new Error("Sandbox access denied: no approval received; no access granted");
+        }
+        assertAccessRequestsUnchanged(requests);
+        assertAccessRequestsWritable(requests, config().filesystem.denyWrite, cwd);
+        addSessionAccessRequests(state(context.sessionID).allowances, requests);
+        return {
+          content: `Session access granted for ${requests.length} path(s). No operation was run.`,
+        };
+      },
+    });
+  });
 
   // Preflight before the original executor prepares any diff or reads a file.
   // Wrapping executors also supplies cancellation, including Code Mode calls.

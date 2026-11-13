@@ -114,8 +114,9 @@ export default function (pi: ExtensionAPI) {
       "Execute a shell command outside the sandbox after explicit user approval. Returns stdout and stderr with the standard bash output limits.",
     promptSnippet: "Run a shell command outside the sandbox after explicit user approval",
     promptGuidelines: [
+      "For grantable filesystem restrictions, prefer sandbox_request_access to keep the operation sandboxed. If that request is denied, do not use bash_unsandboxed to bypass the denial.",
       "Use bash by default. Use bash_unsandboxed only when the user explicitly requests unsandboxed execution, bash fails due to a sandbox restriction, or clear evidence shows the command will hit one.",
-      "When bash fails because of sandbox, permission, filesystem, or network restrictions, rerun the same command with bash_unsandboxed without first asking in chat; bash_unsandboxed handles explicit user approval. Do not use bash_unsandboxed for unrelated commands.",
+      "For sandbox restrictions that cannot be addressed with sandbox_request_access, request bash_unsandboxed approval for the same command without first asking in chat. Check for partial changes before retrying. Do not use bash_unsandboxed for unrelated commands.",
       "Use bash_unsandboxed without a trial bash call when you have clear evidence that the command will hit a sandbox filesystem, permission, or network restriction.",
     ],
     async execute(id, params, signal, onUpdate, ctx) {

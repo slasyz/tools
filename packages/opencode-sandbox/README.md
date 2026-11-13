@@ -95,6 +95,36 @@ Dialogs offer **allow for this session**, **edit the rule**, **abort**, or
 and save to the shared Pi config. Edited rules must match the blocked target;
 invalid rules abort the operation without saving them.
 
+The agent can call `sandbox_request_access` to request several file/directory
+grants in one prompt:
+
+```json
+{
+  "requests": [
+    { "path": "../shared/config", "access": "read" },
+    { "path": "../output", "access": "write" }
+  ]
+}
+```
+
+This tool offers only **Allow** or **Deny** for the entire batch (up to 32 paths).
+It never saves permanent rules. Grants belong only to the requesting session;
+reload/restart discards them. Directory grants include descendants; write grants
+also permit reads. Relative paths use the Location directory, and `~` expands to
+the server user's home. Paths must be literal, not glob rules.
+
+Symlinks appear as `requested path → resolved target`, including links in parent
+directories. Approval covers access through the alias and directly to its target.
+Grants store resolved targets rather than dynamic symlink rules. Targets are
+checked again after approval; changed targets require a new request. Hard write
+denies apply to both names. The built-in OpenCode dialog uses plain text.
+Oversized prompts are rejected rather than truncating paths.
+
+The agent should request the narrowest access needed without a separate chat
+question and prefer this tool to unsandboxed execution for filesystem access.
+Approval does not run or retry any operation. Check for partial changes before
+retrying, and do not bypass a denied request with another tool.
+
 The `shell_unsandboxed` tool accepts the same arguments as OpenCode's `shell`
 tool and requires fresh approval for **every invocation**, even in a disabled
 session. OpenCode's native permissions still apply to approved operations.

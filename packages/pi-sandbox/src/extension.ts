@@ -10,6 +10,9 @@ import {
   addDomainToConfig,
   addReadPathToConfig,
   addWritePathToConfig,
+  addSessionAccessRequests,
+  assertAccessRequestsUnchanged,
+  assertAccessRequestsWritable,
   canonicalizePath,
   domainIsAllowed,
   extractBlockedWritePath,
@@ -34,6 +37,7 @@ import {
 import registerUnsandboxedBash from "./bash-unsandboxed.ts";
 import { createSandboxedBashOps } from "./bash.ts";
 import { authorizeSandboxRequest } from "./policy.ts";
+import registerAccessRequest from "./request-access.ts";
 import {
   formatSandboxConfiguration,
   type PermissionPromptResult,
@@ -157,6 +161,29 @@ export default function (pi: ExtensionAPI) {
     data.waitUntil(() => authorizeRequest(data));
   });
   registerUnsandboxedBash(pi);
+  registerAccessRequest(pi, {
+    available: () => sandboxEnabled && sandboxInitialized && loadConfig().enabled === true,
+    denyWrite: () => loadConfig().filesystem?.denyWrite ?? [],
+    grant: async (requests, signal) => {
+      const previous = structuredClone(allowances);
+      addSessionAccessRequests(allowances, requests);
+      try {
+        await refreshSandbox();
+        if (signal?.aborted) throw new Error("Sandbox authorization cancelled");
+        if (!sandboxEnabled || !sandboxInitialized || !loadConfig().enabled) {
+          throw new Error("Sandbox is inactive or unavailable");
+        }
+        assertAccessRequestsUnchanged(requests);
+        assertAccessRequestsWritable(requests, loadConfig().filesystem?.denyWrite ?? [], localCwd);
+      } catch (error) {
+        Object.assign(allowances, previous);
+        // An approval cancelled during refresh must not remain active in the OS
+        // runtime. A failed rollback refresh leaves execution blocked as usual.
+        if (sandboxInitialized) await refreshSandbox();
+        throw error;
+      }
+    },
+  });
 
   pi.registerTool({
     ...localBash,

@@ -87,6 +87,40 @@ user approval. Without a UI for approval, it does not run the command.
 still matches `denyWrite` produces a warning. `denyRead` is not a hard block
 for the direct Pi read tool: a read grant adds the path to `allowRead`.
 
+### Request access from the agent
+
+The `sandbox_request_access` tool asks for one or more file/directory grants:
+
+```json
+{
+  "requests": [
+    { "path": "../shared/config", "access": "read" },
+    { "path": "../output", "access": "write" }
+  ]
+}
+```
+
+One prompt offers **Allow** or **Deny** for the whole batch (up to 32 paths).
+Grants last only for the current session runtime; they are never saved to config
+or restored after reload/restart. Directory grants include descendants, and
+write grants also permit reads. Relative paths use the session working directory;
+`~` expands to the home directory. Paths must be literal, not glob rules.
+
+The prompt shows symlinks as `requested path → resolved target`, including links
+in parent directories. Approval permits access through the alias and directly
+to the approved target. Grants store resolved targets, not dynamic symlink rules.
+Targets are checked again after approval; a changed target requires a new request.
+Hard write denies apply to both names and cannot be overridden.
+
+Pi's terminal prompt highlights access types and paths; RPC prompts use plain
+text with the same layout. Missing UI, cancellation, timeout, or denial grants
+nothing. Requests too large to display in full are rejected, not truncated.
+
+The agent should request the narrowest access needed without asking separately
+in chat, and prefer this tool to unsandboxed execution for filesystem access.
+This tool does not run or retry an operation. Before retrying a failed operation,
+check for partial changes; do not bypass a denied request with another tool.
+
 ## Authorization API
 
 Other Pi extensions request filesystem access through the side-effect-free

@@ -71,3 +71,26 @@ test("status includes effective config and separate session grants", () => {
   expect(text).toContain("Session domains: example.org");
   expect(text).toContain("Session writes: /approved");
 });
+
+test("access batches offer only Allow and Deny, with no rule editing", async () => {
+  const batch = {
+    ...request,
+    kind: "access" as const,
+    title: "Allow read access for this session?",
+    target: "  /alias → /target\n  /another",
+  };
+  const allowed = context(undefined, undefined, true);
+  expect(await permissionDialog(allowed.ctx, batch)).toEqual({
+    action: "session",
+    value: batch.target,
+    confirmed: true,
+  });
+  expect(allowed.dialog.confirm).toHaveBeenCalledExactlyOnceWith({
+    title: batch.title,
+    message: batch.target,
+    label: { confirm: "Allow", cancel: "Deny" },
+  });
+  expect(allowed.dialog.select).not.toHaveBeenCalled();
+  expect(allowed.dialog.prompt).not.toHaveBeenCalled();
+  expect((await permissionDialog(context().ctx, batch)).action).toBe("abort");
+});

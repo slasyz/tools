@@ -32,3 +32,18 @@ export {
   extractBlockedWritePath,
 } from "./src/runtime.ts";
 export type { SessionAllowances, EffectiveAllowances } from "./src/runtime.ts";
+export {
+  ACCESS_REQUEST_SCHEMA,
+  ACCESS_REQUEST_DESCRIPTION,
+  resolveAccessRequests,
+  assertAccessRequestsUnchanged,
+  assertAccessRequestsWritable,
+  addSessionAccessRequests,
+  formatAccessRequestTitle,
+  formatAccessRequestMessage,
+} from "./src/access-request.ts";
+export type {
+  AccessRequest,
+  AccessRequestInput,
+  ResolvedAccessRequest,
+} from "./src/access-request.ts";

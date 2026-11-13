@@ -2,8 +2,12 @@ import type { Context } from "@opencode/plugin/promise/plugin";
 import type { ShellCreateBefore } from "@opencode/plugin/promise/shell";
 import type { Info, ToolContext } from "@opencode/plugin/promise/tool";
 
+import { execFileSync } from "node:child_process";
+import { realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { DEFAULT_CONFIG, type SandboxConfig } from "sandbox";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { setupSandbox } from "../src/plugin.ts";
 import { WORKER_ENV } from "../src/shell.ts";
@@ -27,6 +31,10 @@ vi.mock("../src/shell.ts", async (original) => ({
 beforeEach(() => {
   mocks.config = structuredClone(DEFAULT_CONFIG);
   mocks.save.mockClear();
+});
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 type Handler = (input: unknown, context: { signal: AbortSignal }) => Promise<unknown>;
@@ -284,4 +292,193 @@ test("explicit config disabling and empty arrays are honored", async () => {
     "denied",
   );
   f.cleanup();
+});
+
+test("access tool grants a mixed batch with one prompt and no global writes", async () => {
+  const f = await fixture();
+  try {
+    await f.poll();
+    const tool = f.tools.get("sandbox_request_access")!;
+    expect(tool.options?.codemode).toBe(false);
+    expect(tool.description).toContain("entire batch");
+    const pending = tool.execute(
+      {
+        requests: [
+          { path: "/outside/input", access: "read" },
+          { path: "/outside/output", access: "write" },
+        ],
+      },
+      f.context(),
+    );
+    const prompts = await f.poll();
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].target).toBe("  read  /outside/input\n  write /outside/output");
+    await f.approve("a", "session", true);
+    await pending;
+    expect(mocks.save).not.toHaveBeenCalled();
+    const status = await f.call("status", { sessionID: "a" });
+    expect(status).toMatchObject({
+      allowances: {
+        readPaths: ["/outside/input"],
+        writePaths: ["/outside/output"],
+      },
+    });
+    await f.tools.get("read")!.execute({ path: "/outside/output" }, f.context());
+    await expect(
+      f.tools.get("read")!.execute({ path: "/outside/output" }, f.context("b")),
+    ).rejects.toThrow("denied");
+    const event = (await f.tools.get("shell")!.execute({ command: "echo hi" }, f.context()))
+      .output as ShellCreateBefore;
+    const config = JSON.parse(event.env[WORKER_ENV]! as string).config;
+    expect(config.filesystem.allowWrite).toContain("/outside/output");
+    expect(config.filesystem.allowRead).toContain("/outside/input");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test.each([
+  ["abort", false, undefined],
+  ["global", true, undefined],
+  ["session", false, undefined],
+  ["session", true, "/unapproved"],
+] as const)(
+  "access tool rejects %s replies without partial grants",
+  async (action, confirmed, value) => {
+    const f = await fixture();
+    try {
+      await f.poll();
+      const pending = f.tools.get("sandbox_request_access")!.execute(
+        {
+          requests: [
+            { path: "/outside/one", access: "read" },
+            { path: "/outside/two", access: "write" },
+          ],
+        },
+        f.context(),
+      );
+      await f.approve("a", action, confirmed, value);
+      await expect(pending).rejects.toThrow("no access granted");
+      expect(await f.call("status", { sessionID: "a" })).toMatchObject({
+        allowances: { readPaths: [], writePaths: [] },
+      });
+      expect(mocks.save).not.toHaveBeenCalled();
+    } finally {
+      f.cleanup();
+    }
+  },
+);
+
+test("access tool rejects headless, invalid, hard-denied, disabled, and foreign requests", async () => {
+  const f = await fixture();
+  try {
+    const tool = f.tools.get("sandbox_request_access")!;
+    const input = { requests: [{ path: "/outside/file", access: "read" }] };
+    await expect(tool.execute(input, f.context())).rejects.toThrow("denied");
+    await f.poll();
+    await expect(tool.execute({ requests: [] }, f.context())).rejects.toThrow("1 to 32");
+    await expect(
+      tool.execute(
+        {
+          requests: [
+            { path: "/outside/file", access: "read" },
+            { path: ".env", access: "write" },
+          ],
+        },
+        f.context(),
+      ),
+    ).rejects.toThrow("denyWrite");
+    expect(await f.poll()).toEqual([]);
+    (mocks.config as SandboxConfig).enabled = false;
+    await expect(tool.execute(input, f.context())).rejects.toThrow("inactive");
+    await expect(tool.execute(input, f.context("foreign"))).rejects.toThrow("another Location");
+    expect(mocks.save).not.toHaveBeenCalled();
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("access tool checks cancellation and refreshed hard denies after approval", async () => {
+  const f = await fixture();
+  try {
+    await f.poll();
+    const tool = f.tools.get("sandbox_request_access")!;
+    const input = { requests: [{ path: "/outside/file", access: "write" }] };
+    const controller = new AbortController();
+    const cancelled = tool.execute(input, { ...f.context(), signal: controller.signal });
+    await f.poll();
+    controller.abort();
+    await expect(cancelled).rejects.toThrow("cancelled");
+    expect(await f.poll()).toEqual([]);
+    const denied = tool.execute(input, f.context());
+    await f.poll();
+    (mocks.config as SandboxConfig).filesystem.denyWrite.push("/outside/file");
+    await f.approve("a", "session", true);
+    await expect(denied).rejects.toThrow("denyWrite");
+    expect(await f.call("status", { sessionID: "a" })).toMatchObject({
+      allowances: { writePaths: [] },
+    });
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("access tool displays symlinks and refuses changed targets", async () => {
+  (mocks.config as SandboxConfig).filesystem.allowRead = ["."];
+  (mocks.config as SandboxConfig).filesystem.allowWrite = ["."];
+  const dir = realpathSync(
+    execFileSync("mktemp", ["-d", "-p", "/tmp", "opencode-access.XXXXXX"], {
+      encoding: "utf8",
+    }).trim(),
+  );
+  dirs.push(dir);
+  writeFileSync(join(dir, "target"), "");
+  writeFileSync(join(dir, "other"), "");
+  symlinkSync("target", join(dir, "link"));
+  const f = await fixture();
+  try {
+    await f.poll();
+    const tool = f.tools.get("sandbox_request_access")!;
+    const input = { requests: [{ path: join(dir, "link"), access: "read" }] };
+    const first = tool.execute(input, f.context());
+    expect((await f.poll())[0].target).toBe(`  ${dir}/link → ${dir}/target`);
+    await f.approve("a", "session", true);
+    await first;
+    expect(await f.call("status", { sessionID: "a" })).toMatchObject({
+      allowances: { readPaths: [join(dir, "target")] },
+    });
+    const changed = tool.execute(input, f.context());
+    await f.poll();
+    unlinkSync(join(dir, "link"));
+    symlinkSync("other", join(dir, "link"));
+    await f.approve("a", "session", true);
+    await expect(changed).rejects.toThrow("target changed");
+    expect(await f.call("status", { sessionID: "a" })).toMatchObject({
+      allowances: { readPaths: [join(dir, "target")] },
+    });
+    await expect(
+      f.tools.get("read")!.execute({ path: join(dir, "link") }, f.context("b")),
+    ).rejects.toThrow("denied");
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("plugin reload discards access grants", async () => {
+  const f = await fixture();
+  await f.poll();
+  const pending = f.tools
+    .get("sandbox_request_access")!
+    .execute({ requests: [{ path: "/outside/file", access: "read" }] }, f.context());
+  await f.approve("a", "session", true);
+  await pending;
+  f.cleanup();
+  const next = await fixture();
+  try {
+    expect(await next.call("status", { sessionID: "a" })).toMatchObject({
+      allowances: { readPaths: [], writePaths: [] },
+    });
+  } finally {
+    next.cleanup();
+  }
 });

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { canonicalizePath, domainIsAllowed, matchesPattern, type SandboxConfig } from "sandbox";
 
 export type AccessKind = "domain" | "read" | "write";
-export type PromptKind = AccessKind | "unsandboxed" | "disable";
+export type PromptKind = AccessKind | "unsandboxed" | "disable" | "access";
 export type Choice = "abort" | "session" | "global";
 
 export function absoluteRule(value: string, cwd: string): string {
