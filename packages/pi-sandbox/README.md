@@ -105,6 +105,11 @@ The `sandbox_request_access` tool asks for one or more file/directory grants:
 }
 ```
 
+In the terminal transcript, the tool lists each path in an indented row with its
+access type and shows a compact, session-only grant summary. Expand the result
+to see approved absolute paths, symlink targets, and the reminder that no operation
+was run. Errors keep their full reason visible.
+
 One prompt offers **Allow** or **Deny** for the whole batch (up to 32 paths).
 Grants last only for the current session runtime; they are never saved to config
 or restored after reload/restart. Directory grants include descendants, and

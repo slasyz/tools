@@ -1,6 +1,6 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 
-import { Key, matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Container, Key, matchesKey, Spacer, Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import {
   ACCESS_REQUEST_SCHEMA,
   ACCESS_REQUEST_DESCRIPTION,
@@ -21,6 +21,20 @@ import {
   permissionTitle,
 } from "./prompt-style.ts";
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
+
+function renderAccessRows(requests: unknown, theme: Theme): string[] {
+  if (!Array.isArray(requests)) return [];
+  return requests.flatMap((request: Partial<ResolvedAccessRequest> | null) => {
+    if (!request || typeof request.path !== "string") return [];
+    const access = request.access === "read" || request.access === "write" ? request.access : "…";
+    const path = theme.fg("accent", theme.bold(request.path));
+    const target =
+      typeof request.target === "string" && request.target !== request.path
+        ? ` → ${theme.fg("accent", theme.bold(request.target))}`
+        : "";
+    return [`  └ ${path}${target} ${theme.fg("muted", `(${access})`)}`];
+  });
+}
 
 export async function promptSessionAccess(
   pi: ExtensionAPI,
@@ -111,7 +125,7 @@ export default function registerAccessRequest(
     grant: (requests: ResolvedAccessRequest[], signal?: AbortSignal) => Promise<void>;
   },
 ): void {
-  pi.registerTool({
+  pi.registerTool<typeof ACCESS_REQUEST_SCHEMA, { requests: ResolvedAccessRequest[] }>({
     name: "sandbox_request_access",
     label: "Request sandbox access",
     description: ACCESS_REQUEST_DESCRIPTION,
@@ -148,6 +162,42 @@ export default function registerAccessRequest(
         ],
         details: { requests },
       };
+    },
+    renderCall(args, theme) {
+      return new Text(
+        [
+          theme.fg("toolTitle", theme.bold("sandbox_request_access:")),
+          ...renderAccessRows(args?.requests, theme),
+        ].join("\n"),
+        0,
+        0,
+      );
+    },
+    renderResult(result, { expanded, isPartial }, theme, context) {
+      const text = result.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      if (context.isError) return new Text(theme.fg("error", `✗ ${text}`), 0, 0);
+      if (isPartial) return new Text(theme.fg("warning", text), 0, 0);
+      const requests = result.details?.requests;
+      if (!requests?.length) return new Text(theme.fg("toolOutput", text), 0, 0);
+      const lines = [
+        theme.fg(
+          "success",
+          `✓ Granted · ${requests.length} ${requests.length === 1 ? "path" : "paths"} · this session only`,
+        ),
+      ];
+      if (expanded) {
+        lines.push(
+          ...renderAccessRows(requests, theme),
+          theme.fg("muted", "  No operation was run."),
+        );
+      }
+      const component = new Container();
+      component.addChild(new Spacer(1));
+      component.addChild(new Text(lines.join("\n"), 0, 0));
+      return component;
     },
   });
 }
