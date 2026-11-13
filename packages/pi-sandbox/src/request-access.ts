@@ -1,37 +1,42 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 
-import { Container, Key, matchesKey, Spacer, Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import {
   ACCESS_REQUEST_SCHEMA,
   ACCESS_REQUEST_DESCRIPTION,
   resolveAccessRequests,
   assertAccessRequestsUnchanged,
   assertAccessRequestsWritable,
-  formatAccessRequestTitle,
   formatAccessRequestMessage,
   type ResolvedAccessRequest,
 } from "sandbox";
+import { displayPath } from "ts-helpers/display-path";
+import { toolStatusLine, toolStatusText } from "ts-helpers/tool-status";
 
-import { displayPath } from "./display-path.ts";
 import { permissionDialog } from "./permission-status.ts";
 import {
   ALLOW_LABEL,
   DENY_LABEL,
+  dialogKey,
+  moveSelection,
   permissionFooter,
-  permissionOption,
+  permissionOptions,
   permissionTitle,
+  requestAttention,
 } from "./prompt-style.ts";
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
 
-function renderAccessRows(requests: unknown, theme: Theme): string[] {
+const OPTIONS = [ALLOW_LABEL, DENY_LABEL];
+
+function renderAccessRows(requests: unknown, theme: Theme, cwd: string): string[] {
   if (!Array.isArray(requests)) return [];
   return requests.flatMap((request: Partial<ResolvedAccessRequest> | null) => {
     if (!request || typeof request.path !== "string") return [];
     const access = request.access === "read" || request.access === "write" ? request.access : "…";
-    const path = theme.fg("accent", theme.bold(displayPath(request.path)));
+    const path = theme.fg("accent", theme.bold(displayPath(request.path, cwd)));
     const target =
       typeof request.target === "string" && request.target !== request.path
-        ? ` → ${theme.fg("accent", theme.bold(displayPath(request.target)))}`
+        ? ` → ${theme.fg("accent", theme.bold(displayPath(request.target, cwd)))}`
         : "";
     return [`  └ ${path}${target} ${theme.fg("muted", `(${access})`)}`];
   });
@@ -47,20 +52,19 @@ export async function promptSessionAccess(
   const access = requests.every((request) => request.access === requests[0]?.access)
     ? requests[0]!.access
     : "filesystem";
-  pi.events.emit("request-attention", { message: "Sandbox permission required" });
+  requestAttention(pi);
   if (ctx.mode === "rpc") {
     const choice = await ctx.ui.select(
-      `${formatAccessRequestTitle(requests)}\n\n${formatAccessRequestMessage(requests, displayPath)}`,
-      ["Allow", "Deny"],
+      `${permissionTitle(access)}\n\n${formatAccessRequestMessage(requests, (path) => displayPath(path))}`,
+      OPTIONS,
       { signal, timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS },
     );
-    return choice === "Allow" && !signal?.aborted;
+    return choice === ALLOW_LABEL && !signal?.aborted;
   }
   if (ctx.mode !== "tui") return false;
 
   let cancel: (() => void) | undefined;
   const abort = () => cancel?.();
-  const timer = setTimeout(abort, RPC_PERMISSION_PROMPT_TIMEOUT_MS);
   signal?.addEventListener("abort", abort, { once: true });
   try {
     const approved = await permissionDialog<boolean>(ctx, (tui, theme, keybindings, done) => {
@@ -78,33 +82,24 @@ export async function promptSessionAccess(
             (value) => theme.fg("accent", displayPath(value)),
             (value) => theme.bold(value),
           );
-          const buttons = [ALLOW_LABEL, DENY_LABEL].map((label, index) =>
-            permissionOption(theme, label, index === selected),
-          );
           return [
             title,
             "",
             ...message.split("\n").map((line) => ` ${line}`),
             "",
-            ...buttons,
+            ...permissionOptions(theme, OPTIONS, selected),
             "",
             permissionFooter(theme),
           ].flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
         },
         handleInput(data) {
-          if (
-            signal?.aborted ||
-            keybindings.matches(data, "tui.select.cancel") ||
-            matchesKey(data, Key.ctrl("c"))
-          ) {
+          const key = dialogKey(keybindings, data);
+          if (signal?.aborted || key === "cancel" || key === "interrupt") {
             done(false);
-          } else if (keybindings.matches(data, "tui.select.confirm")) {
-            done(selected === 0);
-          } else if (
-            keybindings.matches(data, "tui.select.up") ||
-            keybindings.matches(data, "tui.select.down")
-          ) {
-            selected = 1 - selected;
+          } else if (key === "confirm") {
+            done(OPTIONS[selected] === ALLOW_LABEL);
+          } else if (key === "up" || key === "down") {
+            selected = moveSelection(selected, OPTIONS.length, key);
             tui.requestRender();
           }
         },
@@ -113,7 +108,6 @@ export async function promptSessionAccess(
     });
     return approved === true && !signal?.aborted;
   } finally {
-    clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
   }
 }
@@ -164,11 +158,11 @@ export default function registerAccessRequest(
         details: { requests },
       };
     },
-    renderCall(args, theme) {
+    renderCall(args, theme, context) {
       return new Text(
         [
           theme.fg("toolTitle", theme.bold("sandbox_request_access:")),
-          ...renderAccessRows(args?.requests, theme),
+          ...renderAccessRows(args?.requests, theme, context.cwd),
         ].join("\n"),
         0,
         0,
@@ -179,19 +173,22 @@ export default function registerAccessRequest(
         .filter((block) => block.type === "text")
         .map((block) => block.text)
         .join("\n");
-      if (context.isError) return new Text(theme.fg("error", `✗ ${text}`), 0, 0);
-      if (isPartial) return new Text(theme.fg("warning", text), 0, 0);
+      if (context.isError) return new Text(toolStatusText(theme, "error", text), 0, 0);
+      if (isPartial) return new Text(toolStatusText(theme, "pending", text), 0, 0);
       const requests = result.details?.requests;
       if (!requests?.length) return new Text(theme.fg("toolOutput", text), 0, 0);
       const lines = [
-        theme.fg(
+        toolStatusLine(
+          theme,
           "success",
-          `✓ Granted · ${requests.length} ${requests.length === 1 ? "path" : "paths"} · this session only`,
+          "Granted",
+          `${requests.length} ${requests.length === 1 ? "path" : "paths"}`,
+          "this session only",
         ),
       ];
       if (expanded) {
         lines.push(
-          ...renderAccessRows(requests, theme),
+          ...renderAccessRows(requests, theme, context.cwd),
           theme.fg("muted", "  No operation was run."),
         );
       }

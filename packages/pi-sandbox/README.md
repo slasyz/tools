@@ -79,8 +79,10 @@ and Esc to deny. Rule prompts also offer **🔓 Allow for all projects**, which
 requires a second confirmation before saving to `~/.agents/sandbox.json`.
 Tab edits the selected allow rule; Esc resets an edit, and Ctrl+C denies.
 There are no letter hotkeys. Paths and commands wrap rather than truncate.
+Terminal prompts wait until you answer.
 Prompts without a UI abort. In RPC mode, permission prompts use Pi's extension UI
-protocol and time out after five minutes. The RPC client must handle
+protocol with the same labels (plus **(edit rule)** variants, because RPC has no
+inline editor) and time out after five minutes. The RPC client must handle
 `extension_ui_request` records and send matching `extension_ui_response` records;
 otherwise the request is denied when it times out. Write grants also grant reads.
 In terminal mode, permission prompts report `state=blocked:kind=permission` through
@@ -108,11 +110,13 @@ The `sandbox_request_access` tool asks for one or more file/directory grants:
 ```
 
 In the terminal transcript, the tool lists each path in an indented row with its
-access type and shows a compact, session-only grant summary. Expand the result
-to see approved absolute paths, symlink targets, and the reminder that no operation
-was run. Errors keep their full reason visible.
+access type and shows a compact, session-only grant summary. Like `apply_patch`,
+it shows paths inside the working directory relative to it and other home paths
+with `~`. Expand the result to see approved paths, symlink targets, and the
+reminder that no operation was run. Result headings use the same bold layout as
+`apply_patch`; a grant is green. Errors keep their full reason visible.
 
-One prompt offers **Allow** or **Deny** for the whole batch (up to 32 paths).
+One prompt offers **✅ Allow** or **❌ Deny** for the whole batch (up to 32 paths).
 Grants last only for the current session runtime; they are never saved to config
 or restored after reload/restart. Directory grants include descendants, and
 write grants also permit reads. Relative paths use the session working directory;

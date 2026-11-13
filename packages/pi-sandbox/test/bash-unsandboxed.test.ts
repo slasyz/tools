@@ -5,10 +5,10 @@ import {
   type ExtensionAPI,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { displayPath } from "ts-helpers/display-path";
 import { expect, test, vi } from "vitest";
 
 import registerBashUnsandboxed from "../src/bash-unsandboxed.ts";
-import { displayPath } from "../src/display-path.ts";
 
 function createTool(): ToolDefinition {
   let tool: ToolDefinition | undefined;
@@ -47,7 +47,7 @@ test("puts the full command in an RPC confirmation message, not its title", asyn
   const { result, confirm } = await executeWithRpcApproval(command, false);
 
   expect(confirm).toHaveBeenCalledWith(
-    "Run command outside the sandbox?",
+    "🚨 Allow this command outside the sandbox?",
     `Working directory: ${displayPath(process.cwd())}\n\nCommand:\n${command}`,
     { signal: expect.any(AbortSignal), timeout: 5 * 60_000 },
   );
@@ -70,7 +70,7 @@ test("keeps home paths in shell commands literal in approval and execution", asy
   const command = `printf '%s' '${homedir()}'`;
   const { result, confirm } = await executeWithRpcApproval(command, true);
   expect(confirm).toHaveBeenCalledWith(
-    "Run command outside the sandbox?",
+    "🚨 Allow this command outside the sandbox?",
     expect.stringContaining(`Command:\n${command}`),
     expect.anything(),
   );

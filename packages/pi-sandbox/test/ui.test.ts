@@ -27,7 +27,7 @@ test("network prompt offers and validates port-scoped grants", async () => {
     hasUI: true,
     mode: "rpc",
     ui: {
-      select: async () => "Edit rule and allow for this session",
+      select: async () => "✅ Allow (edit rule)",
       input: async () => edits.shift(),
       notify: (message: string) => notices.push(message),
     },
@@ -45,7 +45,7 @@ test("network prompt defaults to a port-scoped grant", async () => {
   const ctx = {
     hasUI: true,
     mode: "rpc",
-    ui: { select: async () => "Allow for this session only" },
+    ui: { select: async () => "✅ Allow" },
   } as unknown as ExtensionContext;
   const pi = { events: createEventBus() } as unknown as ExtensionAPI;
 
@@ -123,6 +123,10 @@ test("network prompt uses the same layout and denial behavior", async () => {
   expect(f.plain()).toContain("api.example.com:443");
   f.input("\x1b[B");
   expect(f.plain()).toContain(" → ❌ Deny");
+  expect(f.plain()).not.toContain("tab edit rule");
+  f.input("\x1b[B");
+  expect(f.plain()).toContain("tab edit rule");
+  f.input("\x1b[A");
   f.input("\r");
   expect(await pending).toEqual({ action: "abort", value: "api.example.com:443" });
 });
@@ -181,7 +185,7 @@ test("RPC shortens a home path but keeps the original permission rule", async ()
     ui: {
       select: async (value: string) => {
         title = value;
-        return "Allow for this session only";
+        return "✅ Allow";
       },
     },
   } as unknown as ExtensionContext;

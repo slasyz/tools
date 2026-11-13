@@ -1,0 +1,17 @@
+{
+  "name": "ts-helpers",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./display-path": "./src/display-path.ts",
+    "./tool-status": "./src/tool-status.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest --run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
+}

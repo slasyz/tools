@@ -28,6 +28,7 @@ import {
   type SessionAllowances,
   supportsNodeEnvProxy,
 } from "sandbox";
+import { displayPath } from "ts-helpers/display-path";
 
 import {
   SANDBOX_AUTHORIZATION_EVENT,
@@ -38,6 +39,7 @@ import { markBashCall } from "./bash-render.ts";
 import registerUnsandboxedBash from "./bash-unsandboxed.ts";
 import { createSandboxedBashOps } from "./bash.ts";
 import { authorizeSandboxRequest } from "./policy.ts";
+import { configPathDisplay, ruleTarget, ruleValidationError } from "./prompt-style.ts";
 import registerAccessRequest from "./request-access.ts";
 import {
   formatSandboxConfiguration,
@@ -108,7 +110,7 @@ export default function (pi: ExtensionAPI) {
     const config = loadConfig();
     const platform = process.platform;
     if (platform !== "darwin" && platform !== "linux") {
-      ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
+      ctx.ui.notify(`Sandbox not supported on ${platform}.`, "warning");
       return false;
     }
 
@@ -233,8 +235,8 @@ export default function (pi: ExtensionAPI) {
             const config = loadConfig();
             if (matchesPattern(blockedPath, config.filesystem?.denyWrite ?? [])) {
               ctx.ui.notify(
-                `⚠️ "${choice.value}" was added to allowWrite, but "${blockedPath}" is also in denyWrite and will remain blocked.\n` +
-                  `Check denyWrite in:\n  ${getConfigPath()}`,
+                `⚠️ "${displayPath(choice.value)}" was added to allowWrite, but "${displayPath(blockedPath)}" is also in denyWrite and will remain blocked.\n` +
+                  `Check denyWrite in:\n  ${configPathDisplay()}`,
                 "warning",
               );
               return result;
@@ -349,12 +351,12 @@ export default function (pi: ExtensionAPI) {
     sessionContext = ctx;
     if (pi.getFlag("no-sandbox") as boolean) {
       sandboxEnabled = false;
-      ctx.ui.notify("Sandbox disabled via --no-sandbox", "warning");
+      ctx.ui.notify("Sandbox disabled via --no-sandbox.", "warning");
       return;
     }
     if (!loadConfig().enabled) {
       sandboxEnabled = false;
-      ctx.ui.notify("Sandbox disabled via config", "info");
+      ctx.ui.notify("Sandbox disabled via config.", "info");
       return;
     }
     await enableSandbox(ctx, true);
@@ -379,10 +381,10 @@ export default function (pi: ExtensionAPI) {
     description: "Enable the sandbox for this session",
     handler: async (_args, ctx) => {
       if (sandboxEnabled && sandboxInitialized) {
-        ctx.ui.notify("Sandbox is already enabled", "info");
+        ctx.ui.notify("Sandbox is already enabled.", "info");
         return;
       }
-      if (await enableSandbox(ctx, false)) ctx.ui.notify("Sandbox enabled", "info");
+      if (await enableSandbox(ctx, false)) ctx.ui.notify("Sandbox enabled.", "info");
     },
   });
 
@@ -390,7 +392,7 @@ export default function (pi: ExtensionAPI) {
     description: "Disable the sandbox for this session",
     handler: async (_args, ctx) => {
       if (!sandboxEnabled) {
-        ctx.ui.notify("Sandbox is already disabled", "info");
+        ctx.ui.notify("Sandbox is already disabled.", "info");
         return;
       }
       if (sandboxInitialized) {
@@ -402,7 +404,7 @@ export default function (pi: ExtensionAPI) {
       }
       sandboxEnabled = false;
       sandboxInitialized = false;
-      ctx.ui.notify("Sandbox disabled", "info");
+      ctx.ui.notify("Sandbox disabled.", "info");
     },
   });
 
@@ -423,19 +425,24 @@ export default function (pi: ExtensionAPI) {
         ctx,
         { access: kind === "domain" ? "network" : kind },
         target,
-        (value) => {
-          if (!value) return "Rule cannot be empty.";
-          const matches =
-            kind === "domain" ? domainIsAllowed(target, [value]) : matchesPattern(target, [value]);
-          return matches ? null : `Rule must match "${target}".`;
-        },
+        (value) =>
+          ruleValidationError(
+            value,
+            kind === "domain" ? domainIsAllowed(target, [value]) : matchesPattern(target, [value]),
+            ruleTarget(kind === "domain" ? "domain" : "path", target),
+          ),
       );
       if (choice.action === "abort") {
-        ctx.ui.notify("Allow cancelled", "info");
+        ctx.ui.notify("Allow cancelled.", "info");
         return;
       }
       await applyChoice(choice.action, kind, choice.value);
-      ctx.ui.notify(`Added ${choice.value} to ${configKey}`, "info");
+      ctx.ui.notify(
+        choice.action === "session"
+          ? `Allowed ${displayPath(choice.value)} for this session.`
+          : `Added ${displayPath(choice.value)} to ${configKey} in ${configPathDisplay()}.`,
+        "info",
+      );
     },
   });
 
@@ -443,7 +450,7 @@ export default function (pi: ExtensionAPI) {
     description: "Show sandbox configuration",
     handler: async (_args, ctx) => {
       if (!sandboxEnabled) {
-        ctx.ui.notify("Sandbox is disabled", "info");
+        ctx.ui.notify("Sandbox is disabled.", "info");
         return;
       }
       ctx.ui.notify(formatSandboxConfiguration(loadConfig(), getConfigPath(), allowances), "info");

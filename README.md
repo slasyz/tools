@@ -12,6 +12,7 @@
 
 - [`git-commit`](./packages/git-commit/) — Generate and refine commit subjects with Pi.
 - [`sandbox`](./packages/sandbox/) — Shared sandbox configuration and runtime utilities.
+- [`ts-helpers`](./packages/ts-helpers/) — Small TypeScript helpers shared by the Pi extensions.
 - [`transcribe-server`](./packages/transcribe-server/) — Local OpenAI-style audio transcription server.
 
 ## Acknowledgements

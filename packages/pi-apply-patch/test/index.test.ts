@@ -330,7 +330,7 @@ describe("pi-apply-patch", () => {
 		if (!update) {
 			throw new Error("apply_patch did not emit a pending update");
 		}
-		expect(update.text).toContain("Applying patch (0/2)...\n• Edited 2 files (+2 -1)");
+		expect(update.text).toContain("Applying patch (0/2)…\n• Edited 2 files (+2 -1)");
 		expect(update.text).toContain("sample.txt (+1 -1)");
 		expect(update.text).toContain("-1 before");
 		expect(update.text).toContain("+1 after");
@@ -384,7 +384,7 @@ describe("pi-apply-patch", () => {
 			},
 		]);
 		expect(rendered).toContain("Applied patch");
-		expect(rendered).toContain("• Edited sample.txt (+1 -1)");
+		expect(rendered).toContain("└ edited sample.txt (+1 -1)");
 		expect(rendered).toContain("-1 before");
 		expect(rendered).toContain("+1 after");
 		expect(await readFile(path.join(directory, "sample.txt"), "utf-8")).toBe("after\n");
@@ -576,8 +576,8 @@ describe("pi-apply-patch", () => {
 		expect(updates[0]?.details?.progress).toEqual({ applied: 0, failed: 0, total: 2 });
 		expect(updates[1]?.details?.progress).toEqual({ applied: 1, failed: 0, total: 2 });
 		expect(updates[2]?.details?.progress).toEqual({ applied: 2, failed: 0, total: 2 });
-		expect(updates[1]?.content.find((block) => block.type === "text")?.text).toContain("Applying patch (1/2)...");
-		expect(updates[2]?.content.find((block) => block.type === "text")?.text).toContain("Applying patch (2/2)...");
+		expect(updates[1]?.content.find((block) => block.type === "text")?.text).toContain("Applying patch (1/2)…");
+		expect(updates[2]?.content.find((block) => block.type === "text")?.text).toContain("Applying patch (2/2)…");
 		expect(await readFile(path.join(directory, "first.txt"), "utf-8")).toBe("ONE\n");
 		expect(await readFile(path.join(directory, "second.txt"), "utf-8")).toBe("TWO\n");
 	});

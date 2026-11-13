@@ -32,7 +32,8 @@
 	},
 	"dependencies": {
 		"diff": "^9.0.0",
-		"pi-sandbox": "workspace:*"
+		"pi-sandbox": "workspace:*",
+		"ts-helpers": "workspace:*"
 	},
 	"devDependencies": {
 		"@types/node": "^26.1.1",

@@ -7,16 +7,26 @@ import {
   type SandboxConfig,
   type SessionAllowances,
 } from "sandbox";
+import { displayPath } from "ts-helpers/display-path";
 
-import { displayPath } from "./display-path.ts";
 import { permissionDialog } from "./permission-status.ts";
 import {
   ALLOW_LABEL,
   DENY_LABEL,
+  dialogKey,
+  editRuleLabel,
+  editRuleTitle,
   GLOBAL_ALLOW_LABEL,
+  globalConfirmHint,
+  globalConfirmMessage,
+  globalConfirmTitle,
+  moveSelection,
   permissionFooter,
   permissionOption,
   permissionTitle,
+  requestAttention,
+  ruleTarget,
+  ruleValidationError,
   type AccessKind,
 } from "./prompt-style.ts";
 
@@ -43,11 +53,11 @@ const PERMISSION_OPTIONS: PromptOption[] = [
   },
 ];
 
-const RPC_SESSION_OPTION = "Allow for this session only";
-const RPC_EDIT_SESSION_OPTION = "Edit rule and allow for this session";
-const RPC_ABORT_OPTION = "Abort (keep blocked)";
-const RPC_GLOBAL_OPTION = "Allow for all projects";
-const RPC_EDIT_GLOBAL_OPTION = "Edit rule and allow for all projects";
+const RPC_SESSION_OPTION = ALLOW_LABEL;
+const RPC_EDIT_SESSION_OPTION = editRuleLabel(ALLOW_LABEL);
+const RPC_ABORT_OPTION = DENY_LABEL;
+const RPC_GLOBAL_OPTION = GLOBAL_ALLOW_LABEL;
+const RPC_EDIT_GLOBAL_OPTION = editRuleLabel(GLOBAL_ALLOW_LABEL);
 
 async function showRpcPermissionPrompt(
   ctx: ExtensionContext,
@@ -85,7 +95,7 @@ async function showRpcPermissionPrompt(
   if (selected === RPC_EDIT_SESSION_OPTION || selected === RPC_EDIT_GLOBAL_OPTION) {
     while (true) {
       const editedValue = await ctx.ui.input(
-        `Edit permission rule for: ${displayPath(originalValue)}`,
+        editRuleTitle(originalValue),
         originalValue,
         dialogOptions,
       );
@@ -108,8 +118,8 @@ async function showRpcPermissionPrompt(
 
   if (action === "global") {
     const confirmed = await ctx.ui.confirm(
-      "Allow for all projects?",
-      `Save "${displayPath(value)}" to ~/.agents/sandbox.json?`,
+      globalConfirmTitle(),
+      globalConfirmMessage(value),
       dialogOptions,
     );
     if (!confirmed) return { action: "abort", value: originalValue };
@@ -127,7 +137,7 @@ export async function showPermissionPrompt(
 ): Promise<PermissionPromptResult> {
   if (!ctx.hasUI) return { action: "abort", value: originalValue };
 
-  pi.events.emit("request-attention", { message: "Sandbox permission required" });
+  requestAttention(pi);
 
   if (ctx.mode === "rpc") {
     const heading = typeof title === "string" ? title : permissionTitle(title.access);
@@ -219,43 +229,44 @@ export async function showPermissionPrompt(
             lines.push(`   ${theme.fg("accent", input.render(Math.max(1, width - 3))[0] ?? "")}`);
           }
           if (pendingAction === option.action) {
-            lines.push(
-              `   ${theme.fg("warning", "Confirm saving this rule to ~/.agents/sandbox.json.")}`,
-            );
+            lines.push(`   ${theme.fg("warning", globalConfirmHint())}`);
           }
           if (editing && isSelected && error) {
-            lines.push(theme.fg("error", `   ✗ ${error}`));
+            lines.push(`   ❌ ${theme.fg("error", error)}`);
           }
         }
         lines.push("");
         lines.push(
-          permissionFooter(theme, { editing, editRule: true, confirm: pendingAction !== null }),
+          permissionFooter(theme, {
+            editing,
+            editRule: isAllowOption(selectedOption()),
+            confirm: pendingAction !== null,
+          }),
         );
         return lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
       },
       handleInput(data: string): void {
-        if (matchesKey(data, Key.ctrl("c"))) {
+        const key = dialogKey(kb, data);
+        if (key === "interrupt") {
           resolve("abort");
           return;
         }
+        if (key === "up" || key === "down") {
+          selectedIndex = moveSelection(selectedIndex, PERMISSION_OPTIONS.length, key);
+          pendingAction = null;
+          if (editing) stopEditing();
+          tui.requestRender();
+          return;
+        }
         if (editing) {
-          if (kb.matches(data, "tui.select.cancel")) {
+          if (key === "cancel") {
             pendingAction = null;
             stopEditing();
             tui.requestRender();
             return;
           }
-          if (kb.matches(data, "tui.select.confirm")) {
+          if (key === "confirm") {
             resolve(selectedOption().action);
-            return;
-          }
-          if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
-            const delta = kb.matches(data, "tui.select.up") ? -1 : 1;
-            selectedIndex =
-              (selectedIndex + delta + PERMISSION_OPTIONS.length) % PERMISSION_OPTIONS.length;
-            pendingAction = null;
-            stopEditing();
-            tui.requestRender();
             return;
           }
           input.handleInput(data);
@@ -264,26 +275,17 @@ export async function showPermissionPrompt(
           tui.requestRender();
           return;
         }
-        if (kb.matches(data, "tui.select.cancel")) {
+        if (key === "cancel") {
           resolve("abort");
+          return;
+        }
+        if (key === "confirm") {
+          resolve(pendingAction ?? selectedOption().action);
           return;
         }
         if (matchesKey(data, Key.tab) && isAllowOption(selectedOption())) {
           beginEditing();
           tui.requestRender();
-          return;
-        }
-        if (kb.matches(data, "tui.select.confirm")) {
-          resolve(pendingAction ?? selectedOption().action);
-          return;
-        }
-        if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
-          const delta = kb.matches(data, "tui.select.up") ? -1 : 1;
-          selectedIndex =
-            (selectedIndex + delta + PERMISSION_OPTIONS.length) % PERMISSION_OPTIONS.length;
-          pendingAction = null;
-          tui.requestRender();
-          return;
         }
       },
       invalidate(): void {
@@ -295,11 +297,6 @@ export async function showPermissionPrompt(
   return result ?? { action: "abort", value: originalValue };
 }
 
-const validRule = (value: string, matches: boolean, target: string): string | null => {
-  if (value.length === 0) return "Rule cannot be empty.";
-  return matches ? null : `Rule must match the blocked ${target}.`;
-};
-
 export function promptDomainBlock(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -307,7 +304,11 @@ export function promptDomainBlock(
 ): Promise<PermissionPromptResult> {
   const target = `${domain.host}:${domain.port}`;
   return showPermissionPrompt(pi, ctx, { access: "network" }, target, (value) =>
-    validRule(value, domainIsAllowed(domain.host, [value], domain.port), `domain "${target}"`),
+    ruleValidationError(
+      value,
+      domainIsAllowed(domain.host, [value], domain.port),
+      ruleTarget("domain", target),
+    ),
   );
 }
 
@@ -317,7 +318,7 @@ export function promptReadBlock(
   path: string,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(pi, ctx, { access: "read" }, path, (value) =>
-    validRule(value, matchesPattern(path, [value]), `path "${displayPath(path)}"`),
+    ruleValidationError(value, matchesPattern(path, [value]), ruleTarget("path", path)),
   );
 }
 
@@ -327,7 +328,7 @@ export function promptWriteBlock(
   path: string,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(pi, ctx, { access: "write" }, path, (value) =>
-    validRule(value, matchesPattern(path, [value]), `path "${displayPath(path)}"`),
+    ruleValidationError(value, matchesPattern(path, [value]), ruleTarget("path", path)),
   );
 }
 
@@ -346,15 +347,15 @@ export function formatSandboxConfiguration(
     ...(allowances.domains.length ? [`  Session allowed: ${allowances.domains.join(", ")}`] : []),
     "",
     "Filesystem (bash + read/write/edit/apply_patch tools):",
-    `  Deny Read:   ${config.filesystem?.denyRead?.map(displayPath).join(", ") || "(none)"}`,
-    `  Allow Read:  ${config.filesystem?.allowRead?.map(displayPath).join(", ") || "(none)"}`,
-    `  Allow Write: ${config.filesystem?.allowWrite?.map(displayPath).join(", ") || "(none)"}`,
-    `  Deny Write:  ${config.filesystem?.denyWrite?.map(displayPath).join(", ") || "(none)"}`,
+    `  Deny Read:   ${config.filesystem?.denyRead?.map((path) => displayPath(path)).join(", ") || "(none)"}`,
+    `  Allow Read:  ${config.filesystem?.allowRead?.map((path) => displayPath(path)).join(", ") || "(none)"}`,
+    `  Allow Write: ${config.filesystem?.allowWrite?.map((path) => displayPath(path)).join(", ") || "(none)"}`,
+    `  Deny Write:  ${config.filesystem?.denyWrite?.map((path) => displayPath(path)).join(", ") || "(none)"}`,
     ...(allowances.readPaths.length
-      ? [`  Session read:  ${allowances.readPaths.map(displayPath).join(", ")}`]
+      ? [`  Session read:  ${allowances.readPaths.map((path) => displayPath(path)).join(", ")}`]
       : []),
     ...(allowances.writePaths.length
-      ? [`  Session write: ${allowances.writePaths.map(displayPath).join(", ")}`]
+      ? [`  Session write: ${allowances.writePaths.map((path) => displayPath(path)).join(", ")}`]
       : []),
     "",
     "Note: ALL reads are prompted unless the path is in allowRead or allowWrite.",

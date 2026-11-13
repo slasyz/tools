@@ -10,12 +10,14 @@ import { oneLine } from "./output.ts";
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 const statusStyle: Record<Status, { glyph: string; color: ThemeColor }> = {
-  starting: { glyph: "○", color: "muted" },
+  starting: { glyph: "⏳", color: "muted" },
   running: { glyph: spinnerFrames[0], color: "accent" },
-  idle: { glyph: "✓", color: "success" },
-  interrupted: { glyph: "■", color: "warning" },
-  failed: { glyph: "✗", color: "error" },
+  idle: { glyph: "✅", color: "success" },
+  interrupted: { glyph: "🛑", color: "warning" },
+  failed: { glyph: "❌", color: "error" },
 };
+// Emoji take two cells; pad the one-cell spinner so the columns line up.
+const GLYPH_WIDTH = 2;
 // The glyph alone is clear for these; other statuses also show their name.
 const glyphOnly = new Set<Status>(["running", "idle"]);
 
@@ -67,7 +69,8 @@ export function widgetLines(
       agent.status === "running"
         ? spinnerFrames[frame % spinnerFrames.length]
         : statusStyle[agent.status].glyph;
-    const prefix = `  ${theme.fg(color, glyph)} ${theme.fg("dim", agent.id.padEnd(idWidth))}  `;
+    const cell = glyph + " ".repeat(Math.max(0, GLYPH_WIDTH - visibleWidth(glyph)));
+    const prefix = `  ${theme.fg(color, cell)} ${theme.fg("dim", agent.id.padEnd(idWidth))}  `;
     const suffix = glyphOnly.has(agent.status) ? "" : `  ${theme.fg(color, agent.status)}`;
     const room = Math.max(0, width - visibleWidth(prefix) - visibleWidth(suffix));
     return prefix + truncateToWidth(oneLine(agent.task_name), room, "…") + suffix;
@@ -104,7 +107,7 @@ export function dialogBridge(getContext: () => ExtensionContext | undefined) {
       if (request.method === "editor") {
         // Pi's editor dialog cannot be cancelled by an AbortSignal.
         ctx.ui.notify(
-          `${title}: editor requests are not supported by background agents`,
+          `${title}: editor requests are not supported by background agents.`,
           "warning",
         );
         return { cancelled: true };

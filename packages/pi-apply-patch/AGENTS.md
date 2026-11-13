@@ -4,7 +4,7 @@ Conventions for human contributors and AI agents working on this repository.
 
 ## Style
 
-- Terse technical prose. No emojis in commits, issues, PR comments, or code.
+- Terse technical prose. No emojis in commits, issues, or PR comments.
 - TypeScript strict mode. No `any`, no `unknown` casts where avoidable, no `@ts-ignore`, no `@ts-expect-error`, no enums.
 - ESM modules with `.js` suffix in import paths (Node16 resolution).
 - Tabs for indentation. Double quotes for strings (matches oxfmt config).

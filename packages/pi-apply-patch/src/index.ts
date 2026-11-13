@@ -1,5 +1,4 @@
 import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
@@ -18,6 +17,8 @@ import {
 	type SandboxAuthorizationEvents,
 	type SandboxAuthorizationRequest,
 } from "pi-sandbox/api";
+import { displayPath } from "ts-helpers/display-path";
+import { toolStatusLine, toolStatusText } from "ts-helpers/tool-status";
 import { Type } from "typebox";
 import { writeFileAtomic } from "./write-file-atomic.js";
 
@@ -180,6 +181,8 @@ type ApplyPatchThemeColor =
 	| "accent"
 	| "error"
 	| "muted"
+	| "success"
+	| "warning"
 	| "toolDiffAdded"
 	| "toolDiffContext"
 	| "toolDiffRemoved"
@@ -528,30 +531,6 @@ function formatPatchFileHeader(file: ApplyPatchPreviewFile, cwd: string): string
 	return `• ${formatPatchOperation(file.operation)} ${formatPatchFileSummary(file, cwd)}`;
 }
 
-function normalizeDisplayPath(filePath: string): string {
-	return filePath.replaceAll(path.sep, "/");
-}
-
-export function displayPath(filePath: string, cwd: string): string {
-	if (!path.isAbsolute(filePath)) {
-		return normalizeDisplayPath(filePath);
-	}
-
-	const absoluteCwd = path.resolve(cwd);
-	const relativePath = path.relative(absoluteCwd, filePath);
-	if (
-		relativePath === "" ||
-		(!relativePath.startsWith(`..${path.sep}`) && relativePath !== ".." && !path.isAbsolute(relativePath))
-	) {
-		return normalizeDisplayPath(relativePath || ".");
-	}
-
-	const home = homedir();
-	if (filePath === home) return "~";
-	const shortened = filePath.startsWith(`${home}${path.sep}`) ? `~${filePath.slice(home.length)}` : filePath;
-	return normalizeDisplayPath(shortened);
-}
-
 export function formatPatchFilePath(file: ApplyPatchPreviewFile, cwd: string = process.cwd()): string {
 	const filePath = displayPath(file.filePath, cwd);
 	if (!file.movePath) {
@@ -858,63 +837,80 @@ function renderOpenCodeLikeDiff(diffText: string, filePath: string, theme: Apply
 	return rendered.join("\n");
 }
 
+type PatchRowState = "pending" | "done";
+
+function formatPatchedOperation(operation: ApplyPatchOperation): string {
+	if (operation === "add") return "added";
+	if (operation === "delete") return "deleted";
+	return "edited";
+}
+
+function formatFailedOperation(operation: ApplyPatchOperation): string {
+	if (operation === "add") return "failed to add";
+	if (operation === "delete") return "failed to delete";
+	return "failed to edit";
+}
+
+/** One file row, styled like the call rows: `└ edited path → dest (+1 -2)`. */
+function renderPatchFileRow(
+	file: ApplyPatchPreviewFile,
+	cwd: string,
+	theme: ApplyPatchTheme,
+	state: PatchRowState,
+	failure: ApplyPatchFailure | undefined,
+): string {
+	const verb = failure
+		? theme.fg("error", formatFailedOperation(file.operation))
+		: state === "pending"
+			? formatPatchingOperation(file.operation)
+			: formatPatchedOperation(file.operation);
+	const filePath = theme.fg("accent", theme.bold(displayPath(file.filePath, cwd)));
+	const destination = file.movePath ? ` → ${theme.fg("accent", theme.bold(displayPath(file.movePath, cwd)))}` : "";
+	const reason = failure ? `${theme.fg("muted", " · ")}${theme.fg("error", failure.message)}` : "";
+	return `  └ ${verb} ${filePath}${destination} ${renderLineCountSummary(file.added, file.removed, theme)}${reason}`;
+}
+
+function renderPatchFileDiff(file: ApplyPatchPreviewFile, theme: ApplyPatchTheme): string {
+	const diff = truncatePreview(file.diff);
+	try {
+		return renderOpenCodeLikeDiff(diff, file.movePath ?? file.filePath, theme);
+	} catch {
+		// Syntax highlighting failed; keep the diff readable with sign colors only.
+		return diff
+			.split("\n")
+			.map((line) =>
+				line.startsWith("+")
+					? theme.fg("toolDiffAdded", line)
+					: line.startsWith("-")
+						? theme.fg("toolDiffRemoved", line)
+						: theme.fg("toolDiffContext", line),
+			)
+			.join("\n");
+	}
+}
+
 function renderPatchPreview(
 	preview: ApplyPatchPreview,
 	cwd: string,
 	theme: ApplyPatchTheme,
 	expanded: boolean,
+	state: PatchRowState,
+	failures: ApplyPatchFailure[],
 ): string {
-	if (expanded) {
-		try {
-			const renderFile = (file: ApplyPatchPreviewFile, headerPrefix: string): string => {
-				const header = formatPatchFileHeader(file, cwd);
-				if (!file.diff) {
-					return headerPrefix.length > 0 ? `${headerPrefix}${formatPatchFileSummary(file, cwd)}` : header;
-				}
-				const previewDiff = truncatePreview(file.diff);
-				const renderedDiff = renderOpenCodeLikeDiff(previewDiff, file.movePath ?? file.filePath, theme);
-				if (headerPrefix.length > 0) {
-					const nestedHeader = `${headerPrefix}${formatPatchFileSummary(file, cwd)}`;
-					return `${nestedHeader}\n${renderedDiff
-						.split("\n")
-						.map((line) => `    ${line}`)
-						.join("\n")}`;
-				}
-				return `${header}\n${renderedDiff}`;
-			};
-
-			if (preview.files.length === 1) {
-				const file = preview.files[0];
-				return file ? renderFile(file, "") : "";
-			}
-
-			const noun = "files";
-			const renderedFiles = preview.files.map((file) => renderFile(file, "  └ ")).join("\n");
-			if (renderedFiles.length > 0) {
-				return `• Edited ${preview.files.length} ${noun} ${formatLineCountSummary(preview.added, preview.removed)}\n${renderedFiles}`;
-			}
-		} catch {
-			// fall back to manual themed line rendering
-		}
+	const failuresByPath = new Map<string, ApplyPatchFailure>();
+	for (const failure of failures) {
+		if (!failuresByPath.has(failure.filePath)) failuresByPath.set(failure.filePath, failure);
 	}
-
-	return formatPatchPreview(preview, cwd, expanded)
-		.split("\n")
-		.map((line) => {
-			const trimmed = line.trimStart();
-			if (trimmed.startsWith("+")) {
-				return theme.fg("toolDiffAdded", line);
-			}
-			if (trimmed.startsWith("-")) {
-				return theme.fg("toolDiffRemoved", line);
-			}
-			if (trimmed.startsWith("•")) {
-				return theme.fg("toolTitle", theme.bold(line));
-			}
-			if (trimmed.startsWith("└")) {
-				return theme.fg("accent", line);
-			}
-			return theme.fg("toolDiffContext", line);
+	return preview.files
+		.flatMap((file) => {
+			const row = renderPatchFileRow(file, cwd, theme, state, failuresByPath.get(file.filePath));
+			if (!expanded || !file.diff) return [row];
+			return [
+				row,
+				...renderPatchFileDiff(file, theme)
+					.split("\n")
+					.map((line) => `    ${line}`),
+			];
 		})
 		.join("\n");
 }
@@ -922,9 +918,9 @@ function renderPatchPreview(
 function formatPendingPatchPaths(patchText: string): string {
 	const paths = extractPatchedPaths(patchText);
 	if (paths.length === 0) {
-		return "Applying patch...";
+		return "Applying patch…";
 	}
-	return `Applying patch...\n${paths.map((filePath) => `• ${filePath}`).join("\n")}`;
+	return `Applying patch…\n${paths.map((filePath) => `• ${filePath}`).join("\n")}`;
 }
 
 async function createPatchPreview(cwd: string, hunks: ParsedPatch[]): Promise<ApplyPatchPreview> {
@@ -1381,8 +1377,8 @@ async function createPendingPatchUpdate(
 	parsedHunks?: ParsedPatch[],
 ): Promise<{ text: string; details: ApplyPatchToolDetails | undefined }> {
 	const title = progress
-		? `Applying patch (${progress.applied + progress.failed}/${progress.total})...`
-		: "Applying patch...";
+		? `Applying patch (${progress.applied + progress.failed}/${progress.total})…`
+		: "Applying patch…";
 	if (previewOverride) {
 		const details: ApplyPatchToolDetails = { preview: previewOverride };
 		if (progress) details.progress = progress;
@@ -1572,30 +1568,44 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 		renderResult(result, options, theme, context) {
 			const component = new Container();
 			const preview = result.details?.preview;
+			const patchResult = result.details?.result;
+			const failed = (patchResult?.failures.length ?? 0) > 0;
 			if (preview) {
-				const bgName = options.isPartial
-					? "toolPendingBg"
-					: result.details?.result && result.details.result.failures.length > 0
-						? "toolErrorBg"
-						: "toolSuccessBg";
+				const bgName = options.isPartial ? "toolPendingBg" : failed ? "toolErrorBg" : "toolSuccessBg";
 				const progress = result.details?.progress;
-				const title = progress
-					? `Applying patch (${progress.applied + progress.failed}/${progress.total})`
-					: options.isPartial
-						? "Applying patch"
-						: result.details?.result && result.details.result.failures.length > 0
-							? "Patch partially failed"
-							: "Applied patch";
-				const failed = (result.details?.result?.failures.length ?? 0) > 0;
-				const summary =
-					!options.isPartial && !failed
-						? `: edited ${preview.files.length} ${preview.files.length === 1 ? "file" : "files"} ${renderLineCountSummary(preview.added, preview.removed, theme)}`
-						: "";
+				const fileCount = `${preview.files.length} ${preview.files.length === 1 ? "file" : "files"}`;
+				const lineCount = renderLineCountSummary(preview.added, preview.removed, theme);
+				const title = options.isPartial
+					? toolStatusLine(
+							theme,
+							"pending",
+							"Applying patch",
+							...(progress ? [`${progress.applied + progress.failed}/${progress.total}`] : []),
+						)
+					: failed
+						? toolStatusLine(
+								theme,
+								"error",
+								patchResult?.hasPartialSuccess ? "Patch partially failed" : "Patch failed",
+							)
+						: toolStatusLine(theme, "neutral", "Applied patch", `${fileCount} ${lineCount}`);
 				const box = new Box(1, 0, (text: string) => applyLayeredBackground(theme, bgName, text));
-				box.addChild(new Text(`${theme.fg("toolTitle", theme.bold(title))}${summary}`, 0, 0));
+				box.addChild(new Text(title, 0, 0));
 				if (options.expanded || failed) {
-					box.addChild(new Spacer(1));
-					box.addChild(new Text(renderPatchPreview(preview, context.cwd, theme, options.expanded), 0, 0));
+					box.addChild(
+						new Text(
+							renderPatchPreview(
+								preview,
+								context.cwd,
+								theme,
+								options.expanded,
+								options.isPartial ? "pending" : "done",
+								patchResult?.failures ?? [],
+							),
+							0,
+							0,
+						),
+					);
 				}
 				if (!options.isPartial && !failed) {
 					component.addChild(new Spacer(1));
@@ -1610,7 +1620,13 @@ export function createApplyPatchTool(options: ApplyPatchToolOptions = {}): Apply
 				.filter((value) => typeof value === "string" && value.length > 0)
 				.join("\n");
 			if (text) {
-				component.addChild(new Text(theme.fg("toolOutput", text), 0, 0));
+				const rendered =
+					context.isError || failed
+						? toolStatusText(theme, "error", text)
+						: options.isPartial
+							? toolStatusText(theme, "pending", text)
+							: theme.fg("toolOutput", text);
+				component.addChild(new Text(rendered, 0, 0));
 			}
 			return component;
 		},

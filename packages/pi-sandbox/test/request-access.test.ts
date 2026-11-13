@@ -64,7 +64,7 @@ async function fixture() {
     on: (name: string, handler: Handler) => hooks.set(name, handler),
   } as unknown as ExtensionAPI;
   const select = vi.fn(
-    async (_title: string, _options: string[], _dialogOptions: unknown) => "Allow",
+    async (_title: string, _options: string[], _dialogOptions: unknown) => "✅ Allow",
   );
   const notify = vi.fn();
   const ctx = {
@@ -101,8 +101,8 @@ test("one RPC prompt grants a mixed batch only for the current runtime", async (
   const result = await f.execute(requests);
   expect(result.content[0]).toMatchObject({ text: expect.stringContaining("2 path(s)") });
   expect(f.select).toHaveBeenCalledExactlyOnceWith(
-    `Allow filesystem access for this session?\n\n  read  ${f.cwd}/input\n  write ${f.cwd}/output`,
-    ["Allow", "Deny"],
+    `📁 Allow filesystem access for this session?\n\n  read  ${f.cwd}/input\n  write ${f.cwd}/output`,
+    ["✅ Allow", "❌ Deny"],
     { signal: undefined, timeout: 300_000 },
   );
   expect(mocks.refresh).toHaveBeenCalledWith(expect.anything(), {
@@ -134,7 +134,7 @@ test("RPC batch prompt shortens home aliases and targets without changing them",
   expect(requests).toEqual(before);
 });
 
-test.each(["Deny", undefined, "Allow for all projects"])(
+test.each(["❌ Deny", undefined, "🔓 Allow for all projects"])(
   "%s never grants any path",
   async (choice) => {
     const f = await fixture();
@@ -159,7 +159,7 @@ test("missing UI and cancellation cannot grant access", async () => {
   const controller = new AbortController();
   f.select.mockImplementation(async () => {
     controller.abort();
-    return "Allow";
+    return "✅ Allow";
   });
   await expect(f.execute([{ path: "file", access: "read" }], controller.signal)).rejects.toThrow(
     "denied",
@@ -191,7 +191,7 @@ test("symlink prompts display both paths and recheck the target after approval",
   f.select.mockImplementation(async () => {
     unlinkSync(join(f.cwd, "alias"));
     symlinkSync("other", join(f.cwd, "alias"));
-    return "Allow";
+    return "✅ Allow";
   });
   await expect(f.execute([{ path: "alias", access: "read" }])).rejects.toThrow("target changed");
   expect(mocks.refresh).not.toHaveBeenCalled();
@@ -310,7 +310,7 @@ test("TUI batch displays both access types and denies the whole batch", async ()
   ).toBe(false);
 });
 
-test("TUI timeout denies without user input", async () => {
+test("TUI prompt waits for the user without a timeout", async () => {
   const f = await fixture();
   vi.useFakeTimers();
   Object.assign(f.ctx, { mode: "tui" });
@@ -320,9 +320,28 @@ test("TUI timeout denies without user input", async () => {
         factory({ terminal: { write() {} } }, {}, {}, done);
       }),
   });
-  const pending = promptSessionAccess(f.pi, f.ctx, [
-    { path: "/file", target: "/file", access: "read" },
-  ]);
-  await vi.advanceTimersByTimeAsync(300_000);
+  const controller = new AbortController();
+  let settled = false;
+  const pending = promptSessionAccess(
+    f.pi,
+    f.ctx,
+    [{ path: "/file", target: "/file", access: "read" }],
+    controller.signal,
+  ).finally(() => (settled = true));
+  await vi.advanceTimersByTimeAsync(60 * 60_000);
+  expect(settled).toBe(false);
+  controller.abort();
   expect(await pending).toBe(false);
+});
+
+test.each([
+  ["✅ Allow", "Allowed api.example.com for this session.", false],
+  ["🔓 Allow for all projects", "Added api.example.com to allowedDomains in ", true],
+])("/sandbox-allow reports where %s stored the rule", async (choice, notice, saved) => {
+  const f = await fixture();
+  f.select.mockResolvedValueOnce(choice);
+  Object.assign(f.ctx.ui, { confirm: async () => true });
+  await f.commands.get("sandbox-allow")!.handler("domain api.example.com", f.ctx);
+  expect(f.notify.mock.calls.at(-1)?.[0]).toContain(notice);
+  expect(mocks.save).toHaveBeenCalledTimes(saved ? 1 : 0);
 });

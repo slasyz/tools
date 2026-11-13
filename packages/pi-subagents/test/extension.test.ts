@@ -331,9 +331,9 @@ test("widget header counts statuses, and every line fits the width", () => {
     50,
   );
   assert.match(lines[0], /^── Subagents ─ 1 running · 1 idle · 1 failed ─+$/);
-  assert.equal(lines[1], "  ⠋ agent-1   search");
-  assert.match(stripTerminalSequences(lines[2]), /^  ✗ agent-2   x+…  failed$/);
-  assert.equal(lines[3], "  ✓ agent-10  review");
+  assert.equal(lines[1], "  ⠋  agent-1   search");
+  assert.match(stripTerminalSequences(lines[2]), /^  ❌ agent-2   x+…  failed$/);
+  assert.equal(lines[3], "  ✅ agent-10  review");
   for (const line of lines) assert.ok(visibleWidth(line) <= 50, line);
   assert.equal(visibleWidth(lines[0]), 50);
 });
@@ -357,11 +357,11 @@ test("widget animates running agents and stops its timer when replaced or cleare
   try {
     renderAgents(ctx, [running, idle]);
     const first = widget.render(50);
-    assert.equal(first[1], "  ⠋ agent-1  work");
+    assert.equal(first[1], "  ⠋  agent-1  work");
     t.mock.timers.tick(80);
     assert.equal(renders, 1);
     const next = widget.render(50);
-    assert.equal(next[1], "  ⠙ agent-1  work");
+    assert.equal(next[1], "  ⠙  agent-1  work");
     assert.equal(next[0], first[0]);
     assert.equal(next[2], first[2]);
     for (let frame = 2; frame <= 10; frame++) {
@@ -371,7 +371,7 @@ test("widget animates running agents and stops its timer when replaced or cleare
     assert.deepEqual(widget.render(50), first, "spinner wraps after ten frames");
 
     renderAgents(ctx, [{ ...running, status: "idle" }, idle]);
-    assert.equal(widget.render(50)[1], "  ✓ agent-1  work");
+    assert.equal(widget.render(50)[1], "  ✅ agent-1  work");
     const stopped = renders;
     t.mock.timers.tick(800);
     assert.equal(renders, stopped, "idle widget must not animate");

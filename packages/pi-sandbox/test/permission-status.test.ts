@@ -13,10 +13,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import assert from "node:assert/strict";
+import { displayPath } from "ts-helpers/display-path";
 import { expect, test, vi } from "vitest";
 
 import registerBashUnsandboxed from "../src/bash-unsandboxed.ts";
-import { displayPath } from "../src/display-path.ts";
 import { promptDomainBlock } from "../src/ui.ts";
 
 const BLOCKED = "\x1b]7501;state=blocked:kind=permission:app=pi\x1b\\";
@@ -50,7 +50,7 @@ function createPrompt(mode: "tui" | "rpc" = "tui") {
         }),
       select: async () => {
         assert.equal(write.mock.calls.length, 0);
-        return "Allow for this session only";
+        return "✅ Allow";
       },
       confirm: async () => {
         assert.equal(write.mock.calls.length, 0);
@@ -197,4 +197,22 @@ test("does not write terminal status without a UI", async () => {
     ctx,
   );
   expect(write).not.toHaveBeenCalled();
+});
+
+test("every permission prompt requests attention with the same event", async () => {
+  const { pi, ctx } = createPrompt("rpc");
+  const events: unknown[] = [];
+  pi.events.on("request-attention", (data) => events.push(data));
+  await promptDomainBlock(pi, ctx, { host: "example.com", port: 443 });
+  await createUnsandboxedTool(pi).execute(
+    "test",
+    { command: "printf approved" },
+    undefined,
+    undefined,
+    ctx,
+  );
+  expect(events).toEqual([
+    { message: "Sandbox permission required" },
+    { message: "Sandbox permission required" },
+  ]);
 });

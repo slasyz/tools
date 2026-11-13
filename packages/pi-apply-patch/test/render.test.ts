@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
 	clearApplyPatchRenderState,
 	createApplyPatchTool,
-	displayPath,
 	formatInFlightCallText,
 	formatPatchPreview,
 	PATCH_PREVIEW_MAX_CHARS,
@@ -39,16 +38,6 @@ const ansiTheme = {
 };
 
 describe("render helpers", () => {
-	it("#given home paths #when displaying #then shortens only the home directory prefix", () => {
-		const home = homedir();
-		const cwd = path.join(home, "project");
-		expect(displayPath(home, cwd)).toBe("~");
-		expect(displayPath(path.join(home, "elsewhere", "file.ts"), cwd)).toBe("~/elsewhere/file.ts");
-		expect(displayPath(path.join(cwd, "file.ts"), cwd)).toBe("file.ts");
-		expect(displayPath(`${home}-other/file.ts`, cwd)).toBe(`${home}-other/file.ts`);
-		expect(displayPath("relative/file.ts", cwd)).toBe("relative/file.ts");
-	});
-
 	it("#given home paths in a move #when rendering #then shortens headers without changing args or diff content", () => {
 		const home = homedir();
 		const cwd = path.join(home, "project");
@@ -126,30 +115,6 @@ describe("render helpers", () => {
 		// then
 		expect(preview.length).toBeLessThanOrEqual(PATCH_PREVIEW_MAX_CHARS);
 		expect(preview).toContain("…");
-	});
-
-	it("#given absolute path under cwd #when displaying #then returns relative path", () => {
-		// given
-		const cwd = "/workspace/project";
-		const absolute = "/workspace/project/src/index.ts";
-
-		// when
-		const rendered = displayPath(absolute, cwd);
-
-		// then
-		expect(rendered).toBe("src/index.ts");
-	});
-
-	it("#given absolute path outside cwd #when displaying #then keeps absolute path", () => {
-		// given
-		const cwd = "/workspace/project";
-		const absolute = "/tmp/file.ts";
-
-		// when
-		const rendered = displayPath(absolute, cwd);
-
-		// then
-		expect(rendered).toBe(absolute);
 	});
 
 	it("#given expanded false #when formatting preview #then renders headers only", () => {
@@ -400,7 +365,8 @@ describe("render helpers", () => {
 
 		// then
 		expect(rendered).toContain("<bold>Applied patch</bold>");
-		expect(rendered).toContain(": edited 1 file");
+		expect(rendered).not.toContain("<fg:success>");
+		expect(rendered).toContain(" · </fg:muted>1 file");
 		expect(rendered).toContain(
 			"(<fg:toolDiffAdded>+1</fg:toolDiffAdded> <fg:toolDiffRemoved>-1</fg:toolDiffRemoved>)",
 		);
@@ -454,7 +420,7 @@ describe("render helpers", () => {
 		// given
 		const tool = createApplyPatchTool();
 		const result = {
-			content: [{ type: "text" as const, text: "Applying patch (1/2)..." }],
+			content: [{ type: "text" as const, text: "Applying patch (1/2)…" }],
 			details: {
 				progress: { applied: 1, failed: 0, total: 2 },
 				preview: {
@@ -484,8 +450,8 @@ describe("render helpers", () => {
 
 		// then
 		expect(rendered).toContain("<bg:toolPendingBg>");
-		expect(rendered).toContain("<bold>Applying patch (1/2)</bold>");
-		expect(rendered).toContain("Applying patch (1/2)");
+		expect(rendered).toContain("<fg:warning><bold>Applying patch</bold></fg:warning>");
+		expect(rendered).toContain(" · </fg:muted>1/2");
 		expect(rendered).not.toContain("src/foo.ts");
 		expect(rendered).not.toContain("alpha old");
 	});
@@ -517,7 +483,7 @@ describe("render helpers", () => {
 		const rendered = component?.render(400).join("\n") ?? "";
 
 		// then
-		expect(rendered).toContain("Applied patch: edited 2 files (+2 -0)");
+		expect(rendered).toContain("Applied patch · 2 files (+2 -0)");
 		expect(rendered).not.toContain("src/a.ts");
 		expect(rendered).not.toContain("src/b.ts");
 		expect(rendered).not.toContain("+1 one");
@@ -583,7 +549,151 @@ describe("render helpers", () => {
 		const rendered = component?.render(400).join("\n") ?? "";
 
 		// then
-		expect(rendered).toContain("• Edited src/large.ts (+50 -0)");
+		expect(rendered).toContain("└ edited src/large.ts (+50 -0)");
 		expect(rendered).toContain("…");
+	});
+
+	it.each([
+		[true, "Patch partially failed"],
+		[false, "Patch failed"],
+	])(
+		"#given failures with partial success %s #when rendering result #then uses the shared error heading",
+		(hasPartialSuccess, title) => {
+			// given
+			const tool = createApplyPatchTool();
+			const result = {
+				content: [{ type: "text" as const, text: "apply_patch failed." }],
+				details: {
+					preview: { files: [], added: 0, removed: 0 },
+					result: {
+						summaries: [],
+						appliedFiles: [],
+						failures: [{ filePath: "a.ts", operation: "update" as const, message: "missing" }],
+						hasPartialSuccess,
+						recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [], failedFiles: ["a.ts"] },
+						details: { fuzz: 0 },
+					},
+				},
+			};
+
+			// when
+			const rendered =
+				tool
+					.renderResult?.(
+						result,
+						{ expanded: false, isPartial: false },
+						identityTheme as never,
+						{ cwd: "/workspace/project", toolCallId: "result-failed", args: { input: "" } } as never,
+					)
+					.render(200)
+					.map((line) => line.trimEnd())
+					.join("\n") ?? "";
+
+			// then
+			expect(rendered).toContain(`${title}`);
+		},
+	);
+
+	it("#given thrown error #when rendering result #then shows the shared error heading", () => {
+		// given
+		const tool = createApplyPatchTool();
+		const result = { content: [{ type: "text" as const, text: "Invalid patch\nline 2" }], details: undefined };
+
+		// when
+		const rendered =
+			tool
+				.renderResult?.(
+					result,
+					{ expanded: false, isPartial: false },
+					markerTheme as never,
+					{ cwd: "/workspace/project", toolCallId: "result-error", args: { input: "" }, isError: true } as never,
+				)
+				.render(200)
+				.map((line) => line.trimEnd())
+				.join("\n") ?? "";
+
+		// then
+		expect(rendered).toBe("<fg:error><bold>Invalid patch</bold></fg:error>\n<fg:error>line 2</fg:error>");
+	});
+
+	const rowsPreview = {
+		files: [
+			{ filePath: "src/a.ts", operation: "update" as const, diff: "-1 old\n+1 new", added: 1, removed: 1 },
+			{ filePath: "src/b.ts", operation: "add" as const, diff: "+1 b", added: 1, removed: 0 },
+		],
+		added: 2,
+		removed: 1,
+	};
+	const renderRows = (
+		details: Record<string, unknown>,
+		options: { expanded: boolean; isPartial: boolean },
+		theme: object = identityTheme,
+	) =>
+		createApplyPatchTool()
+			.renderResult?.(
+				{ content: [{ type: "text" as const, text: "" }], details } as never,
+				options,
+				theme as never,
+				{ cwd: "/workspace/project", toolCallId: "rows", args: { input: "" } } as never,
+			)
+			.render(200)
+			.map((line) => line.trimEnd())
+			.join("\n") ?? "";
+
+	it("#given expanded success #when rendering result #then lists file rows once without a repeated summary", () => {
+		// when
+		const rendered = renderRows({ preview: rowsPreview }, { expanded: true, isPartial: false });
+
+		// then
+		expect(rendered.split("\n").slice(1, 3)).toEqual([
+			" Applied patch · 2 files (+2 -1)",
+			"   └ edited src/a.ts (+1 -1)",
+		]);
+		expect(rendered).not.toContain("• Edited");
+		expect(rendered.match(/\(\+2 -1\)/g)).toHaveLength(1);
+		expect(rendered).toContain("  └ edited src/a.ts (+1 -1)");
+		expect(rendered).toContain("  └ added src/b.ts (+1 -0)");
+	});
+
+	it("#given file rows #when rendering result #then styles paths and counts like the call", () => {
+		// when
+		const rendered = renderRows({ preview: rowsPreview }, { expanded: true, isPartial: false }, markerTheme);
+
+		// then
+		expect(rendered).toContain(
+			"└ edited <fg:accent><bold>src/a.ts</bold></fg:accent> (<fg:toolDiffAdded>+1</fg:toolDiffAdded> <fg:toolDiffRemoved>-1</fg:toolDiffRemoved>)",
+		);
+	});
+
+	it("#given pending preview #when rendering result #then rows use the in-progress verb", () => {
+		// when
+		const rendered = renderRows({ preview: rowsPreview }, { expanded: true, isPartial: true });
+
+		// then
+		expect(rendered).toContain("└ editing src/a.ts (+1 -1)");
+		expect(rendered).toContain("└ adding src/b.ts (+1 -0)");
+	});
+
+	it("#given one failed file #when rendering result #then marks only that file with its reason", () => {
+		// given
+		const result = {
+			summaries: [],
+			appliedFiles: ["src/b.ts"],
+			failures: [{ filePath: "src/a.ts", operation: "update" as const, message: "context not found" }],
+			hasPartialSuccess: true,
+			recoveryInstructions: { mustReadFiles: [], mustNotReadFiles: [], failedFiles: ["src/a.ts"] },
+			details: { fuzz: 0 },
+		};
+
+		// when
+		const plain = renderRows({ preview: rowsPreview, result }, { expanded: false, isPartial: false });
+		const marked = renderRows({ preview: rowsPreview, result }, { expanded: false, isPartial: false }, markerTheme);
+
+		// then
+		expect(plain).toContain("└ failed to edit src/a.ts (+1 -1) · context not found");
+		expect(plain).toContain("└ added src/b.ts (+1 -0)");
+		expect(plain).not.toContain("-1 old");
+		expect(marked).toContain("<fg:error>failed to edit</fg:error>");
+		expect(marked).toContain("<fg:error>context not found</fg:error>");
 	});
 });

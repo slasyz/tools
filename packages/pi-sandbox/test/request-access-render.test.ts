@@ -89,24 +89,35 @@ test("long paths wrap within narrow terminal widths without losing text", () => 
 });
 
 test("collapsed success has a blank line before the colored session-only summary", () => {
-  expect(renderResult()).toBe("\n✓ Granted · 2 paths · this session only");
+  expect(renderResult()).toBe("\nGranted · 2 paths · this session only");
   expect(renderResult(result, {}, markerTheme)).toBe(
-    "\n<success>✓ Granted · 2 paths · this session only</success>",
+    "\n<success><bold>Granted</bold></success><muted> · </muted>2 paths<muted> · </muted>this session only",
   );
   const single = { ...result, details: { requests: requests.slice(0, 1) } };
-  expect(renderResult(single)).toBe("\n✓ Granted · 1 path · this session only");
+  expect(renderResult(single)).toBe("\nGranted · 1 path · this session only");
 });
 
 test("expanded success lists approved paths and symlink targets", () => {
   expect(renderResult(result, { expanded: true })).toBe(
     [
       "",
-      "✓ Granted · 2 paths · this session only",
+      "Granted · 2 paths · this session only",
       "  └ /shared/config → /resolved/config (read)",
       "  └ /output (write)",
       "  No operation was run.",
     ].join("\n"),
   );
+});
+
+test("call shows paths inside cwd relative to it, like apply_patch", () => {
+  const text = tool().renderCall!(
+    { requests: [{ access: "read", path: "/project/src/config" }] },
+    plainTheme as never,
+    { cwd: "/project" } as never,
+  )
+    .render(120)
+    .join("\n");
+  expect(text).toContain("└ src/config (read)");
 });
 
 test("call and expanded result shorten home paths without changing requests", () => {
@@ -132,12 +143,12 @@ test("errors retain the full reason and never show a granted status", () => {
     details: undefined,
   };
   const text = renderResult(failure as never, { isError: true }, markerTheme);
-  expect(text).toBe(`<error>✗ ${failure.content[0].text}</error>`);
-  expect(text).not.toContain("✓ Granted");
-  expect(renderResult(result, { isError: true })).not.toContain("✓ Granted");
+  expect(text).toBe(`<error><bold>${failure.content[0].text}</bold></error>`);
+  expect(text).not.toContain("Granted");
+  expect(renderResult(result, { isError: true })).not.toContain("Granted");
 });
 
 test("partial and unstructured results preserve their text without claiming approval", () => {
-  expect(renderResult(result, { isPartial: true })).toBe(result.content[0].text);
+  expect(renderResult(result, { isPartial: true })).toBe(`${result.content[0].text}`);
   expect(renderResult({ ...result, details: undefined } as never)).toBe(result.content[0].text);
 });

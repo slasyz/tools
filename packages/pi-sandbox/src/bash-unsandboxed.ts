@@ -9,22 +9,24 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import {
-  Box,
-  Container,
-  Key,
-  matchesKey,
-  SelectList,
-  Spacer,
-  Text,
-  type SelectItem,
-} from "@earendil-works/pi-tui";
+import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
+import { displayPath } from "ts-helpers/display-path";
 
 import { markBashCall } from "./bash-render.ts";
-import { displayPath } from "./display-path.ts";
 import { permissionDialog } from "./permission-status.ts";
-import { ALLOW_LABEL, DENY_LABEL, permissionFooter } from "./prompt-style.ts";
+import {
+  ALLOW_LABEL,
+  DENY_LABEL,
+  dialogKey,
+  moveSelection,
+  permissionFooter,
+  permissionOptions,
+  requestAttention,
+  unsandboxedTitle,
+} from "./prompt-style.ts";
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
+
+const OPTIONS = [ALLOW_LABEL, DENY_LABEL];
 
 type ApprovalResult = "approved" | "rejected" | "cancelled" | "too-long";
 
@@ -36,7 +38,7 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
     const message = `Working directory: ${displayPath(ctx.cwd)}\n\nCommand:\n${command}`;
     if (message.length > RPC_PERMISSION_MESSAGE_MAX_LENGTH) return "too-long";
 
-    const approved = await ctx.ui.confirm("Run command outside the sandbox?", message, {
+    const approved = await ctx.ui.confirm(unsandboxedTitle(), message, {
       signal: ctx.signal,
       timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS,
     });
@@ -46,20 +48,24 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
 
   if (ctx.mode !== "tui") {
     const choice = await ctx.ui.select(
-      `Run command outside the sandbox?\nWorking directory: ${displayPath(ctx.cwd)}\n\n${command}`,
-      ["Approve", "Reject"],
+      `${unsandboxedTitle()}\nWorking directory: ${displayPath(ctx.cwd)}\n\n${command}`,
+      OPTIONS,
       { signal: ctx.signal, timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS },
     );
-    if (choice === "Approve") return "approved";
-    if (choice === "Reject") return "rejected";
+    if (choice === ALLOW_LABEL) return "approved";
+    if (choice === DENY_LABEL) return "rejected";
     return "cancelled";
   }
 
-  const choice = await permissionDialog<"cancel" | "run">(ctx, (tui, theme, _keybindings, done) => {
+  const choice = await permissionDialog<"cancel" | "run">(ctx, (tui, theme, keybindings, done) => {
+    let selected = 0;
     const container = new Container();
     container.addChild(
       new Text(
-        theme.fg("warning", `🚨 Allow this command ${theme.bold("outside the sandbox")}?`),
+        theme.fg(
+          "warning",
+          unsandboxedTitle((value) => theme.bold(value)),
+        ),
         0,
         0,
       ),
@@ -76,21 +82,7 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
     container.addChild(commandBox);
     container.addChild(new Spacer(1));
 
-    const items: SelectItem[] = [
-      { value: "run", label: ALLOW_LABEL },
-      { value: "cancel", label: DENY_LABEL },
-    ];
-    const selectList = new SelectList(items, items.length, {
-      selectedPrefix: (text) => theme.fg("accent", text),
-      selectedText: (text) => theme.fg("accent", theme.bold(text)),
-      description: (text) => theme.fg("muted", text),
-      scrollInfo: (text) => theme.fg("dim", text),
-      noMatch: (text) => theme.fg("warning", text),
-    });
-    selectList.onSelect = (item) => done(item.value as "cancel" | "run");
-    selectList.onCancel = () => done("cancel");
-    const choices = new Box(1, 0);
-    choices.addChild(selectList);
+    const choices = new Text(permissionOptions(theme, OPTIONS, selected).join("\n"), 0, 0);
     container.addChild(choices);
     container.addChild(new Spacer(1));
 
@@ -100,12 +92,16 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
       render: (width) => container.render(width),
       invalidate: () => container.invalidate(),
       handleInput: (data) => {
-        if (matchesKey(data, Key.ctrl("c"))) {
+        const key = dialogKey(keybindings, data);
+        if (key === "cancel" || key === "interrupt") {
           done("cancel");
-          return;
+        } else if (key === "confirm") {
+          done(OPTIONS[selected] === ALLOW_LABEL ? "run" : "cancel");
+        } else if (key === "up" || key === "down") {
+          selected = moveSelection(selected, OPTIONS.length, key);
+          choices.setText(permissionOptions(theme, OPTIONS, selected).join("\n"));
+          tui.requestRender();
         }
-        selectList.handleInput(data);
-        tui.requestRender();
       },
     };
   });
@@ -147,11 +143,7 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      pi.events.emit("sandbox:permission-requested", {
-        command: params.command,
-        cwd: ctx.cwd,
-        toolName: "bash_unsandboxed",
-      });
+      requestAttention(pi);
 
       const approval = await requestApproval(ctx, params.command);
 

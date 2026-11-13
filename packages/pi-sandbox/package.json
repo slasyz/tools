@@ -13,7 +13,8 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "sandbox": "workspace:*"
+    "sandbox": "workspace:*",
+    "ts-helpers": "workspace:*"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.87.1",
