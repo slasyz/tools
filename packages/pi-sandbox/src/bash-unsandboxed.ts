@@ -20,6 +20,7 @@ import {
   type SelectItem,
 } from "@earendil-works/pi-tui";
 
+import { markBashCall } from "./bash-render.ts";
 import { displayPath } from "./display-path.ts";
 import { permissionDialog } from "./permission-status.ts";
 import { ALLOW_LABEL, DENY_LABEL, permissionFooter } from "./prompt-style.ts";
@@ -123,6 +124,7 @@ export default function (pi: ExtensionAPI) {
     ...bashDefinition,
     name: "bash_unsandboxed",
     label: "bash (unsandboxed)",
+    renderCall: markBashCall(bashDefinition.renderCall!, () => false),
     description:
       "Execute a shell command outside the sandbox after explicit user approval. Returns stdout and stderr with the standard bash output limits.",
     promptSnippet: "Run a shell command outside the sandbox after explicit user approval",

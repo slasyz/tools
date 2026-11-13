@@ -34,6 +34,7 @@ import {
   type SandboxAuthorizationRequest,
   isSandboxAuthorizationEvent,
 } from "./api.ts";
+import { markBashCall } from "./bash-render.ts";
 import registerUnsandboxedBash from "./bash-unsandboxed.ts";
 import { createSandboxedBashOps } from "./bash.ts";
 import { authorizeSandboxRequest } from "./policy.ts";
@@ -188,6 +189,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     ...localBash,
     label: "bash (sandboxed)",
+    renderCall: markBashCall(localBash.renderCall!, () => sandboxEnabled),
     async execute(id, params, signal, onUpdate, ctx) {
       const runBash = () => {
         if (!sandboxEnabled) {

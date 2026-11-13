@@ -88,6 +88,8 @@ In terminal mode, permission prompts report `state=blocked:kind=permission` thro
 `state=working` when the prompt closes, including rejection or cancellation.
 The `bash_unsandboxed` tool runs a command outside the sandbox only after explicit
 user approval. Without a UI for approval, it does not run the command.
+Terminal command headers show 🔒 for sandboxed bash and 🚨 for unsandboxed bash.
+Regular `bash` also shows 🚨 when sandboxing is disabled. Output stays unchanged.
 `denyWrite` always overrides `allowWrite`; it is never prompted. A grant that
 still matches `denyWrite` produces a warning. `denyRead` is not a hard block
 for the direct Pi read tool: a read grant adds the path to `allowRead`.
