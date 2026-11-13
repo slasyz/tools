@@ -1,12 +1,17 @@
 # Tools
 
+## Extensions and plugins
+
 - [`bb-expand-timeline`](./packages/bb-expand-timeline/) — Expand BB timeline activity summaries by default, with manual collapse.
-- [`git-commit`](./packages/git-commit/) — Generate and refine commit subjects with Pi.
-- [`sandbox`](./packages/sandbox/) — Shared sandbox configuration and runtime utilities.
 - [`pi-apply-patch`](./packages/pi-apply-patch/) — Codex-style `apply_patch` tool extension for Pi.
 - [`pi-sandbox`](./packages/pi-sandbox/) — OS-level sandboxing and permission prompts for Pi.
 - [`pi-subagents`](./packages/pi-subagents/) — Background Pi agents with messaging and live status.
 - [`opencode-sandbox`](./packages/opencode-sandbox/) — OS-level sandboxing and permission prompts for OpenCode V2.
+
+## Tools and services
+
+- [`git-commit`](./packages/git-commit/) — Generate and refine commit subjects with Pi.
+- [`sandbox`](./packages/sandbox/) — Shared sandbox configuration and runtime utilities.
 - [`transcribe-server`](./packages/transcribe-server/) — Local OpenAI-style audio transcription server.
 
 ## Acknowledgements
