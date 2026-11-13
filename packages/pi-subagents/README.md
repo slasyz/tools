@@ -32,6 +32,21 @@ While the parent is working, results arrive after its current turn and tools.
 changing the parent's model. Unknown IDs are rejected; partial names are not accepted.
 The override also applies with `fork_turns: "all"`.
 
+## Open a subagent transcript
+
+In interactive Pi, run `/agents`, select an agent, then choose **Copy snapshot command**.
+Paste the command into another terminal running a POSIX shell (such as zsh or bash).
+It changes to the project directory and opens regular Pi with a separate session:
+
+```sh
+cd '/path/to/project' && pi --fork '/tmp/pi-subagents-XXXXX/agent-1.jsonl'
+```
+
+This opens the saved transcript as it exists when you run the command, not a live stream.
+It does not write to the running subagent's session. Run it before the parent exits or
+reloads, which removes the source file. If clipboard access fails, the notification
+shows the command for manual copying.
+
 ## Behavior and limits
 
 - Each agent runs a long-lived local `pi --mode rpc` subprocess, not tmux.

@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 
 import { AgentManager } from "./src/agents.ts";
+import { copyAgentSnapshot } from "./src/commands.ts";
 import { forkSnapshot } from "./src/fork.ts";
 import { preview } from "./src/output.ts";
 import { resourceArgs, type Connection, type LaunchOptions } from "./src/rpc.ts";
@@ -64,6 +65,13 @@ export default function piSubagents(
     if (context?.hasUI) context.ui.setWidget("pi-subagents", undefined);
     await manager.dispose();
     context = undefined;
+  });
+
+  pi.registerCommand("agents", {
+    description: "Select a subagent and copy a command to open its saved transcript in a new Pi session",
+    handler: async (_args, ctx) => {
+      await copyAgentSnapshot(ctx, manager.list());
+    },
   });
 
   registerTool({

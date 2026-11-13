@@ -15,12 +15,14 @@ const plainTheme = { fg: (_color: string, text: string) => text, bold: (text: st
 
 test("registers six tools, inherits current settings, updates widget, and notifies", async () => {
   const tools = new Map<string, any>();
+  const commands = new Map<string, any>();
   const handlers = new Map<string, any>();
   const widgets: any[] = [];
   const messages: any[] = [];
   const connections: FakeConnection[] = [];
   const pi = {
     registerTool: (tool: any) => tools.set(tool.name, tool),
+    registerCommand: (name: string, command: any) => commands.set(name, command),
     on: (name: string, handler: any) => handlers.set(name, handler),
     sendMessage: (...args: any[]) => messages.push(args),
     getActiveTools: () => ["read", "bash", "spawn_agent", "send_message"],
@@ -54,6 +56,13 @@ test("registers six tools, inherits current settings, updates widget, and notifi
   try {
     handlers.get("session_start")({}, ctx);
     assert.equal(tools.size, 6);
+    assert.ok(commands.has("agents"));
+    const notifications: string[] = [];
+    await commands.get("agents").handler("", {
+      mode: "tui",
+      ui: { notify: (message: string) => notifications.push(message) },
+    });
+    assert.deepEqual(notifications, ["No subagent sessions are available yet."]);
     const response = await tools
       .get("spawn_agent")
       .execute(
@@ -105,6 +114,7 @@ test("spawn_agent accepts exact model overrides and rejects invalid IDs before l
   const lookups: string[][] = [];
   const pi = {
     registerTool: (tool: any) => tools.set(tool.name, tool),
+    registerCommand() {},
     on: (name: string, handler: any) => handlers.set(name, handler),
     sendMessage() {},
     getActiveTools: () => ["read", "spawn_agent"],
@@ -192,6 +202,9 @@ test("child processes do not register subagent tools", () => {
   process.env.PI_SUBAGENTS_CHILD = "1";
   try {
     piSubagents({
+      registerCommand: () => {
+        assert.fail("nested commands registered");
+      },
       registerTool: () => {
         assert.fail("nested tools registered");
       },
