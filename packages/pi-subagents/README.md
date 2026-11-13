@@ -40,9 +40,9 @@ The override also applies with `fork_turns: "all"`.
   discover normal Pi settings and extensions. Parent-only runtime changes to
   providers, tools, credentials, or extension state cannot cross the process boundary.
   Pi clamps the inherited reasoning level to the selected model's capabilities.
-- Fresh context is the default. `fork_turns: "all"` copies the active session branch,
+- `fork_turns: "all"` is the default and copies the active session branch,
   including compaction records, before the spawning tool-call turn. It does not copy
-  unfinished tool calls or abandoned branches.
+  unfinished tool calls or abandoned branches. Set `fork_turns: "none"` for fresh context.
 - Four agents may work concurrently; up to 32 agents can exist per parent session.
   Idle subprocesses stay available for follow-ups. Nested spawning is disabled.
 - Agents share files and permissions, not isolated worktrees. Avoid overlapping

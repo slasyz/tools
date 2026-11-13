@@ -32,6 +32,18 @@ test("registers six tools, inherits current settings, updates widget, and notifi
     thinkingLevel: "high",
     hasUI: true,
     isProjectTrusted: () => false,
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "message",
+          id: "parent-message",
+          parentId: null,
+          message: { role: "user", content: "parent context" },
+        },
+      ],
+      getCwd: () => process.cwd(),
+      getSessionFile: () => "/parent.jsonl",
+    },
     ui: { setWidget: (...args: any[]) => widgets.push(args) },
   } as unknown as ExtensionContext;
   piSubagents(pi, (options) => {
@@ -52,6 +64,9 @@ test("registers six tools, inherits current settings, updates widget, and notifi
         ctx,
       );
     const args = connections[0].options.args;
+    assert.equal(tools.get("spawn_agent").parameters.properties.fork_turns.default, "all");
+    const snapshot = await readFile(args[args.indexOf("--session") + 1], "utf8");
+    assert.match(snapshot, /parent context/, "omitting fork_turns must copy parent history");
     assert.equal(args[args.indexOf("--provider") + 1], "custom");
     assert.equal(args[args.indexOf("--model") + 1], "current");
     assert.equal(args[args.indexOf("--thinking") + 1], "high");
@@ -132,6 +147,7 @@ test("spawn_agent accepts exact model overrides and rejects invalid IDs before l
     assert.equal(schema.properties.model.type, "string");
     assert.ok(!schema.required.includes("model"));
     for (const options of [
+      { context: ctx, fork_turns: undefined },
       { context: ctx, fork_turns: "none" },
       { context: ctx, fork_turns: "all" },
       { context: { ...ctx, model: undefined }, fork_turns: "none" },
@@ -142,6 +158,12 @@ test("spawn_agent accepts exact model overrides and rejects invalid IDs before l
       );
       const connection = connections.at(-1)!;
       const args = connection.options.args;
+      const snapshot = await readFile(args[args.indexOf("--session") + 1], "utf8");
+      const header = JSON.parse(snapshot.trim().split("\n")[0]);
+      assert.equal(
+        header.parentSession,
+        options.fork_turns === "none" ? undefined : "/parent.jsonl",
+      );
       assert.equal(args[args.indexOf("--provider") + 1], "other");
       assert.equal(args[args.indexOf("--model") + 1], "org/alternate");
       assert.equal(args[args.indexOf("--thinking") + 1], "high");
@@ -152,14 +174,14 @@ test("spawn_agent accepts exact model overrides and rejects invalid IDs before l
     }
     assert.deepEqual(
       lookups,
-      Array.from({ length: 3 }, () => ["other", "org/alternate"]),
+      Array.from({ length: 4 }, () => ["other", "org/alternate"]),
     );
     for (const model of ["", "   ", "alternate", "/alternate", "other/"])
       await assert.rejects(spawn({ model }), /exact provider\/model ID/);
     for (const model of ["other/missing", "unknown/org/alternate", "other/org/alter"])
       await assert.rejects(spawn({ model }), /Unknown model.*pi --list-models/);
     await assert.rejects(spawn({}, { ...ctx, model: undefined }), /No current model/);
-    assert.equal(connections.length, 3, "invalid IDs must not launch a child");
+    assert.equal(connections.length, 4, "invalid IDs must not launch a child");
   } finally {
     await handlers.get("session_shutdown")();
   }

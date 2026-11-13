@@ -91,9 +91,9 @@ export default function piSubagents(
       fork_turns: Type.Optional(
         Type.String({
           enum: ["all", "none"],
-          default: "none",
+          default: "all",
           description:
-            "all copies the active conversation before this tool-call turn; none starts fresh",
+            "all (default) copies the active conversation before this tool-call turn; none starts fresh",
         }),
       ),
     }),
@@ -133,7 +133,7 @@ export default function piSubagents(
           args,
           signal,
           snapshot:
-            params.fork_turns === "all" ? forkSnapshot(ctx.sessionManager, toolCallId) : undefined,
+            params.fork_turns !== "none" ? forkSnapshot(ctx.sessionManager, toolCallId) : undefined,
         }),
       );
     },
