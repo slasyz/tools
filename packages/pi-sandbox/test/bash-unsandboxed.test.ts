@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+
 import {
   createEventBus,
   type ExtensionAPI,
@@ -6,6 +8,7 @@ import {
 import { expect, test, vi } from "vitest";
 
 import registerBashUnsandboxed from "../src/bash-unsandboxed.ts";
+import { displayPath } from "../src/display-path.ts";
 
 function createTool(): ToolDefinition {
   let tool: ToolDefinition | undefined;
@@ -45,7 +48,7 @@ test("puts the full command in an RPC confirmation message, not its title", asyn
 
   expect(confirm).toHaveBeenCalledWith(
     "Run command outside the sandbox?",
-    `Working directory: ${process.cwd()}\n\nCommand:\n${command}`,
+    `Working directory: ${displayPath(process.cwd())}\n\nCommand:\n${command}`,
     { signal: expect.any(AbortSignal), timeout: 5 * 60_000 },
   );
   expect(result.content).toEqual([
@@ -61,6 +64,17 @@ test("executes the command only after RPC approval", async () => {
 
   expect(confirm).toHaveBeenCalledOnce();
   expect(result.content).toEqual([{ type: "text", text: "approved" }]);
+});
+
+test("keeps home paths in shell commands literal in approval and execution", async () => {
+  const command = `printf '%s' '${homedir()}'`;
+  const { result, confirm } = await executeWithRpcApproval(command, true);
+  expect(confirm).toHaveBeenCalledWith(
+    "Run command outside the sandbox?",
+    expect.stringContaining(`Command:\n${command}`),
+    expect.anything(),
+  );
+  expect(result.content).toEqual([{ type: "text", text: homedir() }]);
 });
 
 test("refuses commands too long to show in an RPC approval prompt", async () => {

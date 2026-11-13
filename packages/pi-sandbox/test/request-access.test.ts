@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
@@ -120,6 +121,17 @@ test("one RPC prompt grants a mixed batch only for the current runtime", async (
   const next = await fixture();
   await next.commands.get("sandbox")!.handler("", next.ctx);
   expect(next.notify.mock.calls.at(-1)?.[0]).not.toContain(f.cwd);
+});
+
+test("RPC batch prompt shortens home aliases and targets without changing them", async () => {
+  const f = await fixture();
+  const requests = [
+    { path: join(homedir(), "alias"), target: join(homedir(), "target"), access: "read" as const },
+  ];
+  const before = structuredClone(requests);
+  expect(await promptSessionAccess(f.pi, f.ctx, requests)).toBe(true);
+  expect(f.select.mock.calls[0]?.[0]).toContain("~/alias → ~/target");
+  expect(requests).toEqual(before);
 });
 
 test.each(["Deny", undefined, "Allow for all projects"])(

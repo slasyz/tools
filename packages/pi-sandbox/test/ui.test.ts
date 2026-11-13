@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 import {
@@ -8,9 +10,15 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import assert from "node:assert/strict";
+import { DEFAULT_CONFIG } from "sandbox";
 import { expect, test } from "vitest";
 
-import { promptDomainBlock, promptReadBlock, promptWriteBlock } from "../src/ui.ts";
+import {
+  formatSandboxConfiguration,
+  promptDomainBlock,
+  promptReadBlock,
+  promptWriteBlock,
+} from "../src/ui.ts";
 
 test("network prompt offers and validates port-scoped grants", async () => {
   const notices: string[] = [];
@@ -149,4 +157,56 @@ test("escape resets an edited rule before denying", async () => {
   expect(f.plain()).not.toContain("/other");
   f.input("\x1b");
   expect(await pending).toEqual({ action: "abort", value: "/config" });
+});
+
+test.each([promptReadBlock, promptWriteBlock])(
+  "TUI home paths are display-only",
+  async (prompt) => {
+    const f = tuiPrompt();
+    const path = join(homedir(), "config.json");
+    const pending = prompt(f.pi, f.ctx, path);
+    expect(f.plain()).toContain("~/config.json");
+    expect(f.plain()).not.toContain(homedir());
+    f.input("\r");
+    expect(await pending).toEqual({ action: "session", value: path });
+  },
+);
+
+test("RPC shortens a home path but keeps the original permission rule", async () => {
+  const path = join(homedir(), "config.json");
+  let title = "";
+  const ctx = {
+    hasUI: true,
+    mode: "rpc",
+    ui: {
+      select: async (value: string) => {
+        title = value;
+        return "Allow for this session only";
+      },
+    },
+  } as unknown as ExtensionContext;
+  const pi = { events: createEventBus() } as unknown as ExtensionAPI;
+  expect(await promptReadBlock(pi, ctx, path)).toEqual({ action: "session", value: path });
+  expect(title).toContain("~/config.json");
+  expect(title).not.toContain(homedir());
+});
+
+test("configuration display shortens paths without changing stored rules", () => {
+  const path = join(homedir(), "shared");
+  const config = {
+    ...DEFAULT_CONFIG,
+    filesystem: { allowRead: [path], allowWrite: [path], denyRead: [path], denyWrite: [path] },
+  };
+  const allowances = { domains: [], readPaths: [path], writePaths: [path] };
+  const before = structuredClone({ config, allowances });
+  const text = formatSandboxConfiguration(
+    config,
+    join(homedir(), ".agents/sandbox.json"),
+    allowances,
+  );
+  expect(text).toContain("Config: ~/.agents/sandbox.json");
+  expect(text).toContain("Session read:  ~/shared");
+  expect(text).toContain("Session write: ~/shared");
+  expect(text).not.toContain(homedir());
+  expect({ config, allowances }).toEqual(before);
 });

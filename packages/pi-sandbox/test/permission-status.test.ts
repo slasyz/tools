@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { expect, test, vi } from "vitest";
 
 import registerBashUnsandboxed from "../src/bash-unsandboxed.ts";
+import { displayPath } from "../src/display-path.ts";
 import { promptDomainBlock } from "../src/ui.ts";
 
 const BLOCKED = "\x1b]7501;state=blocked:kind=permission:app=pi\x1b\\";
@@ -163,7 +164,7 @@ test("unsandboxed approval uses the shared layout and displays the full command"
     .map((line) => stripVTControlCharacters(line).trimEnd())
     .join("\n");
   expect(plain).toContain("🚨 Allow this command outside the sandbox?");
-  expect(plain).toContain(ctx.cwd);
+  expect(plain).toContain(displayPath(ctx.cwd));
   expect(plain).toContain(command);
   expect(plain).toContain(" → ✅ Allow\n   ❌ Deny");
   expect(plain).toContain("↑↓ navigate • enter select • esc deny");
@@ -171,7 +172,7 @@ test("unsandboxed approval uses the shared layout and displays the full command"
   const narrow = render(24);
   expect(narrow.every((line) => visibleWidth(line) <= 24)).toBe(true);
   const unwrapped = narrow.map((line) => stripVTControlCharacters(line).trim()).join("");
-  expect(unwrapped).toContain(ctx.cwd);
+  expect(unwrapped).toContain(displayPath(ctx.cwd));
   expect(unwrapped).toContain("x".repeat(100));
   input("\x1b[B");
   expect(render().map(stripVTControlCharacters).join("\n")).toContain(" → ❌ Deny");

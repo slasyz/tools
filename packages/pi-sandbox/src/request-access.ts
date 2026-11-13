@@ -12,6 +12,7 @@ import {
   type ResolvedAccessRequest,
 } from "sandbox";
 
+import { displayPath } from "./display-path.ts";
 import { permissionDialog } from "./permission-status.ts";
 import {
   ALLOW_LABEL,
@@ -27,10 +28,10 @@ function renderAccessRows(requests: unknown, theme: Theme): string[] {
   return requests.flatMap((request: Partial<ResolvedAccessRequest> | null) => {
     if (!request || typeof request.path !== "string") return [];
     const access = request.access === "read" || request.access === "write" ? request.access : "…";
-    const path = theme.fg("accent", theme.bold(request.path));
+    const path = theme.fg("accent", theme.bold(displayPath(request.path)));
     const target =
       typeof request.target === "string" && request.target !== request.path
-        ? ` → ${theme.fg("accent", theme.bold(request.target))}`
+        ? ` → ${theme.fg("accent", theme.bold(displayPath(request.target)))}`
         : "";
     return [`  └ ${path}${target} ${theme.fg("muted", `(${access})`)}`];
   });
@@ -49,7 +50,7 @@ export async function promptSessionAccess(
   pi.events.emit("request-attention", { message: "Sandbox permission required" });
   if (ctx.mode === "rpc") {
     const choice = await ctx.ui.select(
-      `${formatAccessRequestTitle(requests)}\n\n${formatAccessRequestMessage(requests)}`,
+      `${formatAccessRequestTitle(requests)}\n\n${formatAccessRequestMessage(requests, displayPath)}`,
       ["Allow", "Deny"],
       { signal, timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS },
     );
@@ -74,7 +75,7 @@ export async function promptSessionAccess(
           );
           const message = formatAccessRequestMessage(
             requests,
-            (value) => theme.fg("accent", value),
+            (value) => theme.fg("accent", displayPath(value)),
             (value) => theme.bold(value),
           );
           const buttons = [ALLOW_LABEL, DENY_LABEL].map((label, index) =>

@@ -20,6 +20,7 @@ import {
   type SelectItem,
 } from "@earendil-works/pi-tui";
 
+import { displayPath } from "./display-path.ts";
 import { permissionDialog } from "./permission-status.ts";
 import { ALLOW_LABEL, DENY_LABEL, permissionFooter } from "./prompt-style.ts";
 import { RPC_PERMISSION_PROMPT_TIMEOUT_MS } from "./ui.ts";
@@ -31,7 +32,7 @@ const RPC_PERMISSION_MESSAGE_MAX_LENGTH = 8192;
 
 async function requestApproval(ctx: ExtensionContext, command: string): Promise<ApprovalResult> {
   if (ctx.mode === "rpc") {
-    const message = `Working directory: ${ctx.cwd}\n\nCommand:\n${command}`;
+    const message = `Working directory: ${displayPath(ctx.cwd)}\n\nCommand:\n${command}`;
     if (message.length > RPC_PERMISSION_MESSAGE_MAX_LENGTH) return "too-long";
 
     const approved = await ctx.ui.confirm("Run command outside the sandbox?", message, {
@@ -44,7 +45,7 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
 
   if (ctx.mode !== "tui") {
     const choice = await ctx.ui.select(
-      `Run command outside the sandbox?\nWorking directory: ${ctx.cwd}\n\n${command}`,
+      `Run command outside the sandbox?\nWorking directory: ${displayPath(ctx.cwd)}\n\n${command}`,
       ["Approve", "Reject"],
       { signal: ctx.signal, timeout: RPC_PERMISSION_PROMPT_TIMEOUT_MS },
     );
@@ -65,7 +66,7 @@ async function requestApproval(ctx: ExtensionContext, command: string): Promise<
     container.addChild(new Spacer(1));
 
     container.addChild(new Text(theme.fg("muted", "Directory"), 1, 0));
-    container.addChild(new Text(theme.fg("accent", ctx.cwd), 3, 0));
+    container.addChild(new Text(theme.fg("accent", displayPath(ctx.cwd)), 3, 0));
     container.addChild(new Spacer(1));
 
     container.addChild(new Text(theme.fg("muted", "Command"), 1, 0));

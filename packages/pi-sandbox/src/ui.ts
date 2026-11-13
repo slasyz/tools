@@ -8,6 +8,7 @@ import {
   type SessionAllowances,
 } from "sandbox";
 
+import { displayPath } from "./display-path.ts";
 import { permissionDialog } from "./permission-status.ts";
 import {
   ALLOW_LABEL,
@@ -84,7 +85,7 @@ async function showRpcPermissionPrompt(
   if (selected === RPC_EDIT_SESSION_OPTION || selected === RPC_EDIT_GLOBAL_OPTION) {
     while (true) {
       const editedValue = await ctx.ui.input(
-        `Edit permission rule for: ${originalValue}`,
+        `Edit permission rule for: ${displayPath(originalValue)}`,
         originalValue,
         dialogOptions,
       );
@@ -108,7 +109,7 @@ async function showRpcPermissionPrompt(
   if (action === "global") {
     const confirmed = await ctx.ui.confirm(
       "Allow for all projects?",
-      `Save "${value}" to ~/.agents/sandbox.json?`,
+      `Save "${displayPath(value)}" to ~/.agents/sandbox.json?`,
       dialogOptions,
     );
     if (!confirmed) return { action: "abort", value: originalValue };
@@ -132,7 +133,7 @@ export async function showPermissionPrompt(
     const heading = typeof title === "string" ? title : permissionTitle(title.access);
     return showRpcPermissionPrompt(
       ctx,
-      `${heading}\n\n  ${originalValue}`,
+      `${heading}\n\n  ${displayPath(originalValue)}`,
       originalValue,
       validateValue,
     );
@@ -207,7 +208,7 @@ export async function showPermissionPrompt(
         const lines = [
           theme.fg("warning", heading),
           "",
-          `   ${theme.fg("accent", originalValue)}`,
+          `   ${theme.fg("accent", displayPath(originalValue))}`,
           "",
         ];
         for (let i = 0; i < PERMISSION_OPTIONS.length; i++) {
@@ -316,7 +317,7 @@ export function promptReadBlock(
   path: string,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(pi, ctx, { access: "read" }, path, (value) =>
-    validRule(value, matchesPattern(path, [value]), `path "${path}"`),
+    validRule(value, matchesPattern(path, [value]), `path "${displayPath(path)}"`),
   );
 }
 
@@ -326,7 +327,7 @@ export function promptWriteBlock(
   path: string,
 ): Promise<PermissionPromptResult> {
   return showPermissionPrompt(pi, ctx, { access: "write" }, path, (value) =>
-    validRule(value, matchesPattern(path, [value]), `path "${path}"`),
+    validRule(value, matchesPattern(path, [value]), `path "${displayPath(path)}"`),
   );
 }
 
@@ -337,7 +338,7 @@ export function formatSandboxConfiguration(
 ): string {
   return [
     "Sandbox Configuration",
-    `  Config: ${configPath}`,
+    `  Config: ${displayPath(configPath)}`,
     "",
     "Network (bash + !cmd):",
     `  Allowed domains: ${config.network?.allowedDomains?.join(", ") || "(none)"}`,
@@ -345,13 +346,15 @@ export function formatSandboxConfiguration(
     ...(allowances.domains.length ? [`  Session allowed: ${allowances.domains.join(", ")}`] : []),
     "",
     "Filesystem (bash + read/write/edit/apply_patch tools):",
-    `  Deny Read:   ${config.filesystem?.denyRead?.join(", ") || "(none)"}`,
-    `  Allow Read:  ${config.filesystem?.allowRead?.join(", ") || "(none)"}`,
-    `  Allow Write: ${config.filesystem?.allowWrite?.join(", ") || "(none)"}`,
-    `  Deny Write:  ${config.filesystem?.denyWrite?.join(", ") || "(none)"}`,
-    ...(allowances.readPaths.length ? [`  Session read:  ${allowances.readPaths.join(", ")}`] : []),
+    `  Deny Read:   ${config.filesystem?.denyRead?.map(displayPath).join(", ") || "(none)"}`,
+    `  Allow Read:  ${config.filesystem?.allowRead?.map(displayPath).join(", ") || "(none)"}`,
+    `  Allow Write: ${config.filesystem?.allowWrite?.map(displayPath).join(", ") || "(none)"}`,
+    `  Deny Write:  ${config.filesystem?.denyWrite?.map(displayPath).join(", ") || "(none)"}`,
+    ...(allowances.readPaths.length
+      ? [`  Session read:  ${allowances.readPaths.map(displayPath).join(", ")}`]
+      : []),
     ...(allowances.writePaths.length
-      ? [`  Session write: ${allowances.writePaths.join(", ")}`]
+      ? [`  Session write: ${allowances.writePaths.map(displayPath).join(", ")}`]
       : []),
     "",
     "Note: ALL reads are prompted unless the path is in allowRead or allowWrite.",

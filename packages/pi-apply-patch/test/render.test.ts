@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	clearApplyPatchRenderState,
@@ -37,6 +39,51 @@ const ansiTheme = {
 };
 
 describe("render helpers", () => {
+	it("#given home paths #when displaying #then shortens only the home directory prefix", () => {
+		const home = homedir();
+		const cwd = path.join(home, "project");
+		expect(displayPath(home, cwd)).toBe("~");
+		expect(displayPath(path.join(home, "elsewhere", "file.ts"), cwd)).toBe("~/elsewhere/file.ts");
+		expect(displayPath(path.join(cwd, "file.ts"), cwd)).toBe("file.ts");
+		expect(displayPath(`${home}-other/file.ts`, cwd)).toBe(`${home}-other/file.ts`);
+		expect(displayPath("relative/file.ts", cwd)).toBe("relative/file.ts");
+	});
+
+	it("#given home paths in a move #when rendering #then shortens headers without changing args or diff content", () => {
+		const home = homedir();
+		const cwd = path.join(home, "project");
+		const filePath = path.join(home, "elsewhere", "old.ts");
+		const movePath = path.join(home, "elsewhere", "new.ts");
+		const input = `*** Begin Patch\n*** Update File: ${filePath}\n*** Move to: ${movePath}\n@@\n-old\n+${home}\n*** End Patch`;
+		const args = { input };
+		const call = createApplyPatchTool()
+			.renderCall?.(
+				args,
+				identityTheme as never,
+				{
+					argsComplete: true,
+					cwd,
+					toolCallId: "home-move",
+				} as never,
+			)
+			?.render(400)
+			.join("\n");
+		expect(call).toContain("~/elsewhere/old.ts → ~/elsewhere/new.ts");
+		expect(args.input).toBe(input);
+
+		const preview = {
+			files: [
+				{ filePath, movePath, operation: "update" as const, diff: `-1 old\n+1 ${home}`, added: 1, removed: 1 },
+			],
+			added: 1,
+			removed: 1,
+		};
+		const rendered = formatPatchPreview(preview, cwd);
+		expect(rendered).toContain("~/elsewhere/old.ts → ~/elsewhere/new.ts");
+		expect(rendered).toContain(`+1 ${home}`);
+		expect(preview.files[0]?.filePath).toBe(filePath);
+	});
+
 	it("#given plain text diff #when truncating #then falls back to head and tail", () => {
 		// given
 		const lines = Array.from({ length: PATCH_PREVIEW_MAX_LINES + 12 }, (_, index) => `line-${index + 1}`);

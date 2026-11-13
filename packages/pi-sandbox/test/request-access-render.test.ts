@@ -1,5 +1,8 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { expect, test } from "vitest";
 
@@ -104,6 +107,18 @@ test("expanded success lists approved paths and symlink targets", () => {
       "  No operation was run.",
     ].join("\n"),
   );
+});
+
+test("call and expanded result shorten home paths without changing requests", () => {
+  const requests = [
+    { path: join(homedir(), "alias"), target: join(homedir(), "target"), access: "read" },
+  ];
+  const original = structuredClone(requests);
+  expect(call({ requests }).join("\n")).toContain("~/alias → ~/target (read)");
+  expect(renderResult({ ...result, details: { requests } }, { expanded: true })).toContain(
+    "~/alias → ~/target (read)",
+  );
+  expect(requests).toEqual(original);
 });
 
 test("errors retain the full reason and never show a granted status", () => {

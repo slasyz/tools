@@ -1,4 +1,5 @@
 import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
@@ -545,7 +546,10 @@ export function displayPath(filePath: string, cwd: string): string {
 		return normalizeDisplayPath(relativePath || ".");
 	}
 
-	return normalizeDisplayPath(filePath);
+	const home = homedir();
+	if (filePath === home) return "~";
+	const shortened = filePath.startsWith(`${home}${path.sep}`) ? `~${filePath.slice(home.length)}` : filePath;
+	return normalizeDisplayPath(shortened);
 }
 
 export function formatPatchFilePath(file: ApplyPatchPreviewFile, cwd: string = process.cwd()): string {
